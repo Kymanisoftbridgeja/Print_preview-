@@ -20,7 +20,8 @@ import com.receiptbridge.server.WebServer
 @Composable
 fun HomeScreen(
     onNavigateToPrinters: () -> Unit,
-    onNavigateToQueue: () -> Unit
+    onNavigateToQueue: () -> Unit,
+    onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
 
@@ -70,18 +71,11 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // We need to pass the navigation callback, but signature change needed.
-        // For now, I'll just add the button but it won't work unless I update the signature.
-        // I will update the signature in the next tool call properly or just leave it out if too complex for right now.
-        // Actually, let's update the signature. It requires updating AppNavigation too.
-        // I will just adding the placeholder button.
         Button(
-            // onClick = onNavigateToSettings, 
-            onClick = { /* TODO: Wire up Settings */ },
+            onClick = onNavigateToSettings,
             modifier = Modifier.fillMaxWidth(),
-            enabled = false
         ) {
-            Text("Settings (Coming Soon)")
+            Text("Settings")
         }
     }
 }

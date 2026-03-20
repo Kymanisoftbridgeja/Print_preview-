@@ -11,12 +11,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.core.content.ContextCompat
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.repository.JobRepository
+import com.receiptbridge.server.WebServer
 import com.receiptbridge.ui.AppNavigation
 import com.receiptbridge.ui.theme.ReceiptBridgeTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -41,8 +43,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         checkPermissions()
+        ensurePrintServerRunning()
         handleDeepLink(intent)
 
         setContent {
@@ -82,6 +85,11 @@ class MainActivity : ComponentActivity() {
         if (toRequest.isNotEmpty()) {
             permissionLauncher.launch(toRequest.toTypedArray())
         }
+    }
+
+    private fun ensurePrintServerRunning() {
+        val serviceIntent = Intent(this, WebServer::class.java)
+        ContextCompat.startForegroundService(this, serviceIntent)
     }
 
     private fun handleDeepLink(intent: Intent?) {

@@ -11,7 +11,7 @@ enum class JobStatus {
 @Entity(tableName = "print_jobs")
 data class PrintJob(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val printerProfileId: String?, // Null allows picking default
+    val printerProfileId: String? = null, // Null allows picking default
     val payloadJson: String,
     val status: JobStatus = JobStatus.PENDING,
     val timestamp: Long = System.currentTimeMillis(),

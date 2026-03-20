@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 rootProject.name = "ReceiptBridge"
 include(":app")
 project(":app").projectDir = file("App/app")
+
+// Trigger sync

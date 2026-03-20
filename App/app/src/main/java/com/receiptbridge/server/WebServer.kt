@@ -61,7 +61,7 @@ class WebServer : Service() {
         val notification: Notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("ReceiptBridge Server Running")
             .setContentText("Listening on port 9900")
-            .setSmallIcon(R.drawable.ic_launcher_foreground) // Ensure this icon exists or use system default
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
             .build()
 
         startForeground(1, notification)

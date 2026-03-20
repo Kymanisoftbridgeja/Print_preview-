@@ -4,6 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.receiptbridge.ui.screens.HomeScreen
+import com.receiptbridge.ui.screens.ProfilesScreen
+import com.receiptbridge.ui.screens.QueueScreen
 import com.receiptbridge.ui.screens.SettingsScreen
 
 @Composable
@@ -14,7 +17,8 @@ fun AppNavigation() {
         composable("home") {
             HomeScreen(
                 onNavigateToPrinters = { navController.navigate("printers") },
-                onNavigateToQueue = { navController.navigate("queue") }
+                onNavigateToQueue = { navController.navigate("queue") },
+                onNavigateToSettings = { navController.navigate("settings") }
             )
         }
         
