@@ -23,9 +23,9 @@ class JobsViewModel @Inject constructor(
         }
     }
     
-    fun clearAll() {
+    fun clearHistory() {
         viewModelScope.launch {
-            repository.clearAllJobs()
+            repository.clearHistoryJobs()
         }
     }
 }

@@ -3,6 +3,8 @@ package com.receiptbridge
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Base64
@@ -18,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.repository.JobRepository
+import com.receiptbridge.data.repository.PrinterRepository
+import com.receiptbridge.data.repository.SettingsRepository
 import com.receiptbridge.server.WebServer
 import com.receiptbridge.ui.AppNavigation
 import com.receiptbridge.ui.theme.ReceiptBridgeTheme
@@ -30,6 +34,12 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var jobRepository: JobRepository
+
+    @Inject
+    lateinit var printerRepository: PrinterRepository
+
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -46,7 +56,7 @@ class MainActivity : ComponentActivity() {
 
         checkPermissions()
         ensurePrintServerRunning()
-        handleDeepLink(intent)
+        handleIncomingIntent(intent)
 
         setContent {
             ReceiptBridgeTheme {
@@ -62,7 +72,7 @@ class MainActivity : ComponentActivity() {
     
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleDeepLink(intent)
+        handleIncomingIntent(intent)
     }
 
     private fun checkPermissions() {
@@ -92,6 +102,38 @@ class MainActivity : ComponentActivity() {
         ContextCompat.startForegroundService(this, serviceIntent)
     }
 
+    private fun handleIncomingIntent(intent: Intent?) {
+        handleUsbAttach(intent)
+        handleDeepLink(intent)
+    }
+
+    private fun handleUsbAttach(intent: Intent?) {
+        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) {
+            return
+        }
+
+        val device = intent.getUsbDevice() ?: return
+        lifecycleScope.launch {
+            settingsRepository.refreshSettings()
+            val settings = settingsRepository.settings.value
+            val (profile, created) = printerRepository.ensureUsbProfile(
+                deviceAddress = device.deviceName,
+                displayName = buildUsbPrinterName(device)
+            )
+
+            if (settings.autoPrintOnConnect) {
+                jobRepository.retryRecoverableUsbJobs(profile.id)
+            }
+
+            val status = if (created) "added" else "ready"
+            Toast.makeText(
+                this@MainActivity,
+                "USB printer $status: ${profile.name}",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
     private fun handleDeepLink(intent: Intent?) {
         intent?.data?.let { uri ->
             if (uri.scheme == "receiptbridge" && uri.host == "print") {
@@ -112,6 +154,23 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    private fun buildUsbPrinterName(device: UsbDevice): String {
+        val parts = listOfNotNull(device.manufacturerName, device.productName)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        return parts.joinToString(" ").ifBlank { "USB Printer ${device.deviceId}" }
+    }
+
+    private fun Intent.getUsbDevice(): UsbDevice? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            getParcelableExtra(UsbManager.EXTRA_DEVICE)
         }
     }
 }

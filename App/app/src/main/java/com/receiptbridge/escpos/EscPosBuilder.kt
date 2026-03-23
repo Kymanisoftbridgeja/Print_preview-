@@ -5,6 +5,7 @@ import java.nio.charset.Charset
 
 class EscPosBuilder {
     private val buffer = ByteArrayOutputStream()
+    private var currentCharset: Charset = Charset.forName("UTF-8")
 
     companion object {
         const val ESC: Byte = 0x1B
@@ -17,9 +18,24 @@ class EscPosBuilder {
         return this
     }
 
-    fun text(text: String, charset: String = "UTF-8"): EscPosBuilder {
+    fun text(text: String): EscPosBuilder {
         try {
-            buffer.write(text.toByteArray(Charset.forName(charset)))
+            buffer.write(text.toByteArray(currentCharset))
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return this
+    }
+
+    fun setCodePage(page: Int): EscPosBuilder {
+        // ESC t n
+        buffer.write(byteArrayOf(ESC, 't'.code.toByte(), page.toByte()))
+        return this
+    }
+
+    fun setEncoding(charset: String): EscPosBuilder {
+        try {
+            currentCharset = Charset.forName(charset)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -85,6 +101,51 @@ class EscPosBuilder {
          val m = if (full) 65 else 66
          buffer.write(byteArrayOf(GS, 'V'.code.toByte(), m.toByte(), feedLines.toByte()))
          return this
+    }
+
+    fun qrCode(data: String, size: Int = 3): EscPosBuilder {
+        val bytes = data.toByteArray(Charset.forName("UTF-8"))
+        val pL = (bytes.size + 3) % 256
+        val pH = (bytes.size + 3) / 256
+
+        // 1. Model selection (Model 2)
+        buffer.write(byteArrayOf(GS, '('.code.toByte(), 'k'.code.toByte(), 4, 0, 49, 65, 50, 0))
+        // 2. Module size
+        buffer.write(byteArrayOf(GS, '('.code.toByte(), 'k'.code.toByte(), 3, 0, 49, 67, size.toByte()))
+        // 3. Error correction (Level M)
+        buffer.write(byteArrayOf(GS, '('.code.toByte(), 'k'.code.toByte(), 3, 0, 49, 69, 49))
+        // 4. Store data
+        buffer.write(byteArrayOf(GS, '('.code.toByte(), 'k'.code.toByte(), pL.toByte(), pH.toByte(), 49, 80, 48))
+        buffer.write(bytes)
+        // 5. Print
+        buffer.write(byteArrayOf(GS, '('.code.toByte(), 'k'.code.toByte(), 3, 0, 49, 81, 48))
+
+        return this
+    }
+
+    fun image(width: Int, height: Int, data: ByteArray): EscPosBuilder {
+        // GS v 0 m xL xH yL yH d1...dk
+        // xL xH is width in bytes (width dots / 8)
+        val xBytes = (width + 7) / 8
+        val xL = xBytes % 256
+        val xH = xBytes / 256
+        val yL = height % 256
+        val yH = height / 256
+
+        buffer.write(byteArrayOf(GS, 'v'.code.toByte(), '0'.code.toByte(), 0, xL.toByte(), xH.toByte(), yL.toByte(), yH.toByte()))
+        buffer.write(data)
+        return this
+    }
+
+    fun drawerOpen(): EscPosBuilder {
+        // ESC p m t1 t2
+        buffer.write(byteArrayOf(ESC, 'p'.code.toByte(), 0, 25, 250.toByte()))
+        return this
+    }
+
+    fun beep(): EscPosBuilder {
+        buffer.write(byteArrayOf(ESC, 'B'.code.toByte(), 2, 1))
+        return this
     }
 
     // Helper for bytes

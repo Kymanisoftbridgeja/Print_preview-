@@ -7,6 +7,7 @@ import com.google.gson.Gson
 import com.receiptbridge.data.ConnectionType
 import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.PrinterProfile
+import com.receiptbridge.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,7 +16,8 @@ import javax.inject.Singleton
 
 @Singleton
 class PrinterDriver @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val settingsRepository: SettingsRepository
 ) {
     private val gson = Gson()
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -36,25 +38,45 @@ class PrinterDriver @Inject constructor(
                 
                 val builder = EscPosBuilder().reset()
                 
+                // Refresh settings
+                settingsRepository.refreshSettings()
+                val settings = settingsRepository.settings.value
+                
+                // Apply Global Header
+                settings.globalHeader?.let { header ->
+                    // For now assume header is simple text if no "base64:" prefix
+                    if (header.startsWith("base64:")) {
+                         val decoded = android.util.Base64.decode(header.removePrefix("base64:"), android.util.Base64.DEFAULT)
+                         builder.image(384, 100, decoded) // Default dimensions
+                    } else {
+                         builder.align("center").text(header).newLine()
+                    }
+                }
+                
                 // Process Blocks
                 val blocks = payload.content.blocks
                 for (block in blocks) {
                     processBlock(builder, block, profile)
                 }
                 
+                // Apply Global Footer
+                settings.globalFooter?.let { footer ->
+                    builder.newLine().align("center").text(footer).newLine()
+                }
+
                 // Finalize (Feed & Cut)
-                // Use profile settings if not specified in blocks, but usually blocks control this via explicit commands.
-                // However, the prompt says "The app must ensure the receipt ends cleanly"
-                // If the last block is NOT a cut, we might want to add connection.
-                // For now, let's assume the payload includes necessary cut/feed, OR we append it based on profile.
                 if (profile.autoCut) {
-                     // Check if last command was cut? simplified: just cut if profile says so and we assume payload didn't.
-                     // A cleaner way is to let the payload drive it, but we can append a feed.
                      builder.feed(profile.feedLines)
                      builder.cut()
                 }
 
-                connection.write(builder.build())
+                val printData = builder.build()
+                
+                // Honor copies
+                val copies = if (payload.copies > 0) payload.copies else 1
+                repeat(copies) {
+                    connection.write(printData)
+                }
                 
             } finally {
                 connection.disconnect()
@@ -65,21 +87,19 @@ class PrinterDriver @Inject constructor(
     private fun createConnection(profile: PrinterProfile): PrinterConnection {
         return when (profile.connectionType) {
             ConnectionType.NETWORK -> {
-                // Address likely "192.168.1.100" or "192.168.1.100:9100"
                 val parts = profile.address.split(":")
                 val host = parts[0]
                 val port = if (parts.size > 1) parts[1].toIntOrNull() ?: 9100 else 9100
                 NetworkConnection(host, port)
             }
             ConnectionType.BLUETOOTH -> {
-                // Address is MAC
                 if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
                      throw IllegalStateException("Bluetooth is not enabled")
                 }
                 BluetoothConnection(bluetoothAdapter, profile.address)
             }
             ConnectionType.USB -> {
-                throw UnsupportedOperationException("USB Printing not yet implemented")
+                UsbConnection(context, profile.address)
             }
         }
     }
@@ -107,6 +127,14 @@ class PrinterDriver @Inject constructor(
                 val mode = block.value as? String ?: "full"
                 builder.cut(mode == "full")
             }
+            "charset" -> {
+                val charset = block.value as? String ?: "UTF-8"
+                builder.setEncoding(charset)
+            }
+            "codepage" -> {
+                val page = (block.value as? Double)?.toInt() ?: 0
+                builder.setCodePage(page)
+            }
             "row2" -> {
                 // Two column row: "Item A" .... "$10.00"
                 val left = block.left ?: ""
@@ -127,14 +155,38 @@ class PrinterDriver @Inject constructor(
                 builder.newLine()
             }
             "qr" -> {
-                // QR Code Implementation
-                // GS ( k ...
-                // For now, simplified or text fallback
                 val data = block.value as? String ?: return
-                // Valid implementation would be complex. 
-                // Let's print text fallback for now or TODO
-                builder.text("[QR: $data]")
-                builder.newLine()
+                val size = (block.left?.toIntOrNull() ?: 3).coerceIn(1, 16)
+                builder.qrCode(data, size)
+            }
+            "image" -> {
+                // Expects base64 encoded raster data
+                val base64Data = block.value as? String ?: return
+                val width = block.left?.toIntOrNull() ?: 384
+                val height = block.right?.toIntOrNull() ?: 100
+                try {
+                    val decoded = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+                    builder.image(width, height, decoded)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            "drawer" -> {
+                builder.drawerOpen()
+            }
+            "beep" -> {
+                builder.beep()
+            }
+            "raw" -> {
+                val hex = block.value as? String ?: return
+                // Simple hex to byte array
+                val hexChars = hex.replace(" ", "").toCharArray()
+                val bytes = ByteArray(hexChars.size / 2)
+                for (i in 0 until bytes.size) {
+                    bytes[i] = ((Character.digit(hexChars[i * 2], 16) shl 4) +
+                                Character.digit(hexChars[i * 2 + 1], 16)).toByte()
+                }
+                builder.raw(bytes)
             }
         }
     }

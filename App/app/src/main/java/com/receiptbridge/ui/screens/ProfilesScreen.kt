@@ -1,4 +1,7 @@
 package com.receiptbridge.ui.screens
+ 
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -6,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -90,6 +94,7 @@ fun ProfilesScreen(
 
     if (showDialog) {
         AddPrinterDialog(
+            viewModel = viewModel,
             onDismiss = { showDialog = false },
             onConfirm = { name, type, address ->
                 viewModel.addProfile(name, type, address)
@@ -99,14 +104,18 @@ fun ProfilesScreen(
     }
 }
 
+@SuppressLint("MissingPermission")
 @Composable
 fun AddPrinterDialog(
+    viewModel: PrinterViewModel,
     onDismiss: () -> Unit,
     onConfirm: (String, ConnectionType, String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("192.168.1.100") }
     var type by remember { mutableStateOf(ConnectionType.NETWORK) }
+    
+    val usbDevices = remember { viewModel.getUsbDevices() }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -116,28 +125,110 @@ fun AddPrinterDialog(
                 TextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Profile Name") }
+                    label = { Text("Profile Name") },
+                    modifier = Modifier.fillMaxWidth()
                 )
-                // Simplified Type Selection (Just 2 buttons for now)
+                
+                // Connection Type Selection
                 Row(modifier = Modifier.padding(vertical = 8.dp)) {
-                    Button(onClick = { type = ConnectionType.NETWORK }, enabled = type != ConnectionType.NETWORK) {
-                        Text("Network")
+                    Button(
+                        onClick = { type = ConnectionType.NETWORK }, 
+                        enabled = type != ConnectionType.NETWORK,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Net")
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { type = ConnectionType.BLUETOOTH }, enabled = type != ConnectionType.BLUETOOTH) {
-                        Text("Bluetooth")
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Button(
+                        onClick = { type = ConnectionType.BLUETOOTH }, 
+                        enabled = type != ConnectionType.BLUETOOTH,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("BT")
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Button(
+                        onClick = { type = ConnectionType.USB }, 
+                        enabled = type != ConnectionType.USB,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("USB")
                     }
                 }
                 
-                TextField(
-                    value = address,
-                    onValueChange = { address = it },
-                    label = { Text(if (type == ConnectionType.NETWORK) "IP Address" else "MAC Address") }
-                )
+                if (type == ConnectionType.USB) {
+                    Text("Select USB Device:", style = MaterialTheme.typography.labelMedium)
+                    if (usbDevices.isEmpty()) {
+                        Text("No USB devices found", color = MaterialTheme.colorScheme.error)
+                    } else {
+                        LazyColumn(modifier = Modifier.height(100.dp)) {
+                            items(usbDevices) { device ->
+                                Text(
+                                    text = device.deviceName,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { address = device.deviceName }
+                                        .padding(8.dp),
+                                    color = if (address == device.deviceName) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                } else if (type == ConnectionType.BLUETOOTH) {
+                    val btDevices by viewModel.foundBtDevices.collectAsState()
+                    Button(onClick = { viewModel.scanBluetooth() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Scan Bluetooth")
+                    }
+                    LazyColumn(modifier = Modifier.height(100.dp)) {
+                        items(btDevices) { device ->
+                            Text(
+                                text = "${device.name ?: "Unknown"} (${device.address})",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { address = device.address }
+                                    .padding(8.dp),
+                                color = if (address == device.address) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                } else if (type == ConnectionType.NETWORK) {
+                    val ipDevices by viewModel.foundIpDevices.collectAsState()
+                    Button(onClick = { viewModel.scanNetwork() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Scan Network (Port 9100)")
+                    }
+                    LazyColumn(modifier = Modifier.height(100.dp)) {
+                        items(ipDevices) { ip ->
+                            Text(
+                                text = ip,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { address = ip }
+                                    .padding(8.dp),
+                                color = if (address == ip) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                    TextField(
+                        value = address,
+                        onValueChange = { address = it },
+                        label = { Text("IP Address") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    TextField(
+                        value = address,
+                        onValueChange = { address = it },
+                        label = { Text("MAC Address") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name, type, address) }) {
+            TextButton(
+                onClick = { onConfirm(name, type, address) },
+                enabled = name.isNotBlank() && address.isNotBlank()
+            ) {
                 Text("Add")
             }
         },

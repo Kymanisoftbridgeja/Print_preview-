@@ -12,6 +12,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-feature android:name="android.hardware.usb.host" />
 
     <application
         android:name=".ReceiptBridgeApp"
@@ -44,6 +45,14 @@
                     android:scheme="receiptbridge"
                     android:host="print" />
             </intent-filter>
+
+            <!-- USB Auto-launch -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
         </activity>
         
         <!-- Service for HTTP Server -->

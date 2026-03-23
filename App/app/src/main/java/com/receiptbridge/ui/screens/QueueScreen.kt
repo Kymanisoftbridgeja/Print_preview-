@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,9 +12,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -30,23 +36,37 @@ fun QueueScreen(
     viewModel: JobsViewModel = hiltViewModel()
 ) {
     val jobs by viewModel.allJobs.collectAsState(initial = emptyList())
+    var selectedTab by remember { mutableStateOf(0) }
+
+    val activeJobs = jobs.filter { it.status == JobStatus.PENDING || it.status == JobStatus.PRINTING }
+    val historyJobs = jobs.filter { it.status == JobStatus.COMPLETED || it.status == JobStatus.FAILED }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
     ) {
-        Text("Print Queue", style = MaterialTheme.typography.titleLarge)
-        
-        Button(
-            onClick = { viewModel.clearAll() },
-            modifier = Modifier.padding(vertical = 8.dp)
-        ) {
-            Text("Clear All History")
+        TabRow(selectedTabIndex = selectedTab) {
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
+                Text("Active (${activeJobs.size})", modifier = Modifier.padding(16.dp))
+            }
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
+                Text("History (${historyJobs.size})", modifier = Modifier.padding(16.dp))
+            }
         }
 
-        LazyColumn {
-            items(jobs) { job ->
+        val displayJobs = if (selectedTab == 0) activeJobs else historyJobs
+
+        if (selectedTab == 1 && historyJobs.isNotEmpty()) {
+            Button(
+                onClick = { viewModel.clearHistory() },
+                modifier = Modifier.padding(16.dp).fillMaxWidth()
+            ) {
+                Text("Clear History")
+            }
+        }
+
+        LazyColumn(modifier = Modifier.padding(16.dp)) {
+            items(displayJobs) { job ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -65,9 +85,14 @@ fun QueueScreen(
                             }
                         }
                         
+                        // Action buttons
                         if (job.status == JobStatus.FAILED) {
                             Button(onClick = { viewModel.retryJob(job) }) {
                                 Text("Retry")
+                            }
+                        } else if (job.status == JobStatus.COMPLETED) {
+                            Button(onClick = { viewModel.retryJob(job) }) {
+                                Text("Re-print")
                             }
                         }
                     }

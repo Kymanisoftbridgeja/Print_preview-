@@ -8,50 +8,82 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.receiptbridge.ui.viewmodel.SettingsViewModel
 
 @Composable
 fun SettingsScreen(
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel()
 ) {
-    var debugMode by remember { mutableStateOf(false) }
-    var keepHistory by remember { mutableStateOf(true) }
+    val settings by viewModel.settings.collectAsState()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        Text("Settings", style = MaterialTheme.typography.titleLarge)
+        Text("Global Print Settings", style = MaterialTheme.typography.titleLarge)
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        TextField(
+            value = settings.globalHeader ?: "",
+            onValueChange = { viewModel.updateSettings(settings.copy(globalHeader = it)) },
+            label = { Text("Global Header (Text or base64:...)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        TextField(
+            value = settings.globalFooter ?: "",
+            onValueChange = { viewModel.updateSettings(settings.copy(globalFooter = it)) },
+            label = { Text("Global Footer Text") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        TextField(
+            value = settings.keepHistoryDays.toString(),
+            onValueChange = { input ->
+                if (input.all(Char::isDigit)) {
+                    viewModel.updateSettings(
+                        settings.copy(keepHistoryDays = input.toIntOrNull() ?: 0)
+                    )
+                }
+            },
+            label = { Text("Keep History (Days)") },
+            supportingText = { Text("Completed and failed jobs older than this are removed automatically.") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
+        )
         
         Spacer(modifier = Modifier.height(24.dp))
         
         SettingToggle(
-            title = "Debug Mode",
-            checked = debugMode,
-            onCheckedChange = { debugMode = it }
-        )
-        
-        SettingToggle(
-            title = "Keep Print History",
-            checked = keepHistory,
-            onCheckedChange = { keepHistory = it }
+            title = "Auto-print on USB Connect",
+            checked = settings.autoPrintOnConnect,
+            onCheckedChange = { viewModel.updateSettings(settings.copy(autoPrintOnConnect = it)) }
         )
         
         Spacer(modifier = Modifier.height(24.dp))
         
-        Text("App Version: 1.0.0", style = MaterialTheme.typography.bodyMedium)
+        Text("App Version: 1.1.0", style = MaterialTheme.typography.bodyMedium)
     }
 }
 

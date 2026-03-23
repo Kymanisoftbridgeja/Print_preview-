@@ -20,6 +20,9 @@ interface PrinterProfileDao {
     @Query("SELECT * FROM printer_profiles WHERE id = :id")
     suspend fun getById(id: String): PrinterProfile?
 
+    @Query("SELECT * FROM printer_profiles WHERE connectionType = :connectionType AND address = :address LIMIT 1")
+    suspend fun getByConnectionAndAddress(connectionType: ConnectionType, address: String): PrinterProfile?
+
     @Query("SELECT * FROM printer_profiles WHERE isDefault = 1 LIMIT 1")
     suspend fun getDefault(): PrinterProfile?
 
@@ -47,7 +50,32 @@ interface PrintJobDao {
 
     @Update
     suspend fun update(job: PrintJob)
-    
+
+    @Query("DELETE FROM print_jobs WHERE status IN ('COMPLETED', 'FAILED')")
+    suspend fun clearHistory()
+
+    @Query("DELETE FROM print_jobs WHERE timestamp < :cutoffTimestamp AND status IN ('COMPLETED', 'FAILED')")
+    suspend fun deleteHistoryOlderThan(cutoffTimestamp: Long)
+
+    @Query(
+        """
+        UPDATE print_jobs
+        SET status = 'PENDING', errorMessage = NULL
+        WHERE status = 'FAILED'
+          AND (
+              printerProfileId IS NULL
+              OR (:printerProfileId IS NOT NULL AND printerProfileId = :printerProfileId)
+          )
+          AND (
+              errorMessage LIKE 'No printer profile found%'
+              OR errorMessage LIKE 'USB Device % not found%'
+              OR errorMessage LIKE 'USB Permission denied%'
+              OR errorMessage LIKE 'Failed to open USB device%'
+          )
+        """
+    )
+    suspend fun retryRecoverableUsbJobs(printerProfileId: String?): Int
+
     @Query("DELETE FROM print_jobs")
     suspend fun clearAll()
 }
@@ -64,9 +92,10 @@ class Converters {
     fun toJobStatus(value: String): JobStatus = JobStatus.valueOf(value)
 }
 
-@Database(entities = [PrinterProfile::class, PrintJob::class], version = 1, exportSchema = false)
+@Database(entities = [PrinterProfile::class, PrintJob::class, AppSettings::class], version = 2, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun printerProfileDao(): PrinterProfileDao
     abstract fun printJobDao(): PrintJobDao
+    abstract fun settingsDao(): SettingsDao
 }

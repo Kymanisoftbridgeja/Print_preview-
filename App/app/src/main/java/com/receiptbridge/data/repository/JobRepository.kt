@@ -27,6 +27,20 @@ class JobRepository @Inject constructor(
         printJobDao.update(job)
     }
 
+    suspend fun retryRecoverableUsbJobs(printerProfileId: String?): Int {
+        return printJobDao.retryRecoverableUsbJobs(printerProfileId)
+    }
+
+    suspend fun clearHistoryJobs() {
+        printJobDao.clearHistory()
+    }
+
+    suspend fun purgeHistoryOlderThan(days: Int) {
+        val retentionDays = days.coerceAtLeast(0)
+        val cutoffMillis = System.currentTimeMillis() - retentionDays * 24L * 60L * 60L * 1000L
+        printJobDao.deleteHistoryOlderThan(cutoffMillis)
+    }
+
     suspend fun clearAllJobs() {
         printJobDao.clearAll()
     }

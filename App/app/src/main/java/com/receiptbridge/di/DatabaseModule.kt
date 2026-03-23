@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.receiptbridge.data.AppDatabase
 import com.receiptbridge.data.PrintJobDao
 import com.receiptbridge.data.PrinterProfileDao
+import com.receiptbridge.data.SettingsDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -23,7 +24,13 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "receipt-bridge-db"
-        ).build()
+        ).fallbackToDestructiveMigration()
+         .build()
+    }
+
+    @Provides
+    fun provideSettingsDao(database: AppDatabase): SettingsDao {
+        return database.settingsDao()
     }
 
     @Provides
