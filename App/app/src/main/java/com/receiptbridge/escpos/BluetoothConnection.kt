@@ -24,16 +24,27 @@ class BluetoothConnection(
     @SuppressLint("MissingPermission")
     override suspend fun connect() {
         withContext(Dispatchers.IO) {
+            val device: BluetoothDevice = bluetoothAdapter.getRemoteDevice(macAddress)
             try {
-                val device: BluetoothDevice = bluetoothAdapter.getRemoteDevice(macAddress)
-                // Use createRfcommSocketToServiceRecord for secure connection, or createInsecureRfcommSocketToServiceRecord if needed
-                // Trying standard secure first
+                if (bluetoothAdapter.isDiscovering) {
+                    bluetoothAdapter.cancelDiscovery()
+                }
                 socket = device.createRfcommSocketToServiceRecord(sppUuid)
                 socket?.connect()
-                outputStream = socket?.getOutputStream()
-            } catch (e: IOException) {
+                outputStream = socket?.outputStream
+            } catch (secureError: IOException) {
                 disconnect()
-                throw e
+                try {
+                    if (bluetoothAdapter.isDiscovering) {
+                        bluetoothAdapter.cancelDiscovery()
+                    }
+                    socket = device.createInsecureRfcommSocketToServiceRecord(sppUuid)
+                    socket?.connect()
+                    outputStream = socket?.outputStream
+                } catch (insecureError: IOException) {
+                    disconnect()
+                    throw insecureError
+                }
             }
         }
     }

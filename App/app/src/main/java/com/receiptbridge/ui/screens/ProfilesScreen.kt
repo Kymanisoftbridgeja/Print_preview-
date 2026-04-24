@@ -148,7 +148,10 @@ fun AddPrinterDialog(
                 // Connection Type Selection
                 Row(modifier = Modifier.padding(vertical = 8.dp)) {
                     Button(
-                        onClick = { type = ConnectionType.NETWORK }, 
+                        onClick = {
+                            type = ConnectionType.NETWORK
+                            address = "192.168.1.100"
+                        },
                         enabled = type != ConnectionType.NETWORK,
                         modifier = Modifier.weight(1f)
                     ) {
@@ -156,7 +159,10 @@ fun AddPrinterDialog(
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     Button(
-                        onClick = { type = ConnectionType.BLUETOOTH }, 
+                        onClick = {
+                            type = ConnectionType.BLUETOOTH
+                            address = ""
+                        },
                         enabled = type != ConnectionType.BLUETOOTH,
                         modifier = Modifier.weight(1f)
                     ) {
@@ -164,7 +170,10 @@ fun AddPrinterDialog(
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     Button(
-                        onClick = { type = ConnectionType.USB }, 
+                        onClick = {
+                            type = ConnectionType.USB
+                            address = ""
+                        },
                         enabled = type != ConnectionType.USB,
                         modifier = Modifier.weight(1f)
                     ) {
@@ -192,21 +201,51 @@ fun AddPrinterDialog(
                     }
                 } else if (type == ConnectionType.BLUETOOTH) {
                     val btDevices by viewModel.foundBtDevices.collectAsState()
-                    Button(onClick = { viewModel.scanBluetooth() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Scan Bluetooth")
+                    val isBluetoothScanning by viewModel.isBluetoothScanning.collectAsState()
+                    val bluetoothScanMessage by viewModel.bluetoothScanMessage.collectAsState()
+                    Button(
+                        onClick = { viewModel.scanBluetooth() },
+                        enabled = !isBluetoothScanning,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (isBluetoothScanning) "Scanning..." else "Scan Bluetooth")
+                    }
+                    bluetoothScanMessage?.let { message ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (btDevices.isEmpty()) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
                     }
                     LazyColumn(modifier = Modifier.height(100.dp)) {
                         items(btDevices) { device ->
+                            val deviceName = device.name?.takeIf { it.isNotBlank() } ?: "Unknown"
                             Text(
-                                text = "${device.name ?: "Unknown"} (${device.address})",
+                                text = "$deviceName (${device.address})",
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { address = device.address }
+                                    .clickable {
+                                        address = device.address
+                                        if (name.isBlank()) {
+                                            name = if (deviceName == "Unknown") "Bluetooth Printer" else deviceName
+                                        }
+                                    }
                                     .padding(8.dp),
                                 color = if (address == device.address) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
+                    TextField(
+                        value = address,
+                        onValueChange = { address = it },
+                        label = { Text("MAC Address") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 } else if (type == ConnectionType.NETWORK) {
                     val ipDevices by viewModel.foundIpDevices.collectAsState()
                     Button(onClick = { viewModel.scanNetwork() }, modifier = Modifier.fillMaxWidth()) {
