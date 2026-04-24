@@ -44,10 +44,20 @@ class PrinterDriver @Inject constructor(
                 
                 // Apply Global Header
                 settings.globalHeader?.let { header ->
-                    // For now assume header is simple text if no "base64:" prefix
                     if (header.startsWith("base64:")) {
-                         val decoded = android.util.Base64.decode(header.removePrefix("base64:"), android.util.Base64.DEFAULT)
-                         builder.image(384, 100, decoded) // Default dimensions
+                         val rasterImage = EscPosImageEncoder.decodeBase64Image(
+                             base64Data = header,
+                             targetWidth = profile.charactersPerLine * 8
+                         )
+                         if (rasterImage != null) {
+                             builder.align("center").image(
+                                 rasterImage.width,
+                                 rasterImage.height,
+                                 rasterImage.rasterBytes
+                             ).newLine()
+                         } else {
+                             builder.align("center").text(header.removePrefix("base64:")).newLine()
+                         }
                     } else {
                          builder.align("center").text(header).newLine()
                     }
@@ -73,7 +83,11 @@ class PrinterDriver @Inject constructor(
                 val printData = builder.build()
                 
                 // Honor copies
-                val copies = if (payload.copies > 0) payload.copies else 1
+                val copies = when {
+                    job.copies > 0 -> job.copies
+                    payload.copies > 0 -> payload.copies
+                    else -> 1
+                }
                 repeat(copies) {
                     connection.write(printData)
                 }
@@ -160,15 +174,28 @@ class PrinterDriver @Inject constructor(
                 builder.qrCode(data, size)
             }
             "image" -> {
-                // Expects base64 encoded raster data
                 val base64Data = block.value as? String ?: return
                 val width = block.left?.toIntOrNull() ?: 384
-                val height = block.right?.toIntOrNull() ?: 100
-                try {
-                    val decoded = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
-                    builder.image(width, height, decoded)
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                val height = block.right?.toIntOrNull()
+                val rasterImage = EscPosImageEncoder.decodeBase64Image(base64Data, width, height)
+
+                if (rasterImage != null) {
+                    builder.image(
+                        rasterImage.width,
+                        rasterImage.height,
+                        rasterImage.rasterBytes
+                    )
+                } else {
+                    // Backward compatibility for callers already sending packed raster bytes.
+                    try {
+                        val decoded = android.util.Base64.decode(
+                            base64Data.substringAfter("base64,", missingDelimiterValue = base64Data),
+                            android.util.Base64.DEFAULT
+                        )
+                        builder.image(width, height ?: 100, decoded)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
             }
             "drawer" -> {

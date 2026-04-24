@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -36,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.receiptbridge.data.ConnectionType
@@ -71,19 +73,30 @@ fun ProfilesScreen(
                             .fillMaxWidth()
                             .padding(vertical = 8.dp)
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(profile.name, style = MaterialTheme.typography.titleMedium)
-                                Text("${profile.connectionType} - ${profile.address}")
-                                if (profile.isDefault) {
-                                    Text("DEFAULT", color = MaterialTheme.colorScheme.primary)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(profile.name, style = MaterialTheme.typography.titleMedium)
+                                    Text("${profile.connectionType} - ${profile.address}")
+                                    if (profile.isDefault) {
+                                        Text("DEFAULT", color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                                IconButton(onClick = { viewModel.deleteProfile(profile) }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete")
                                 }
                             }
-                            IconButton(onClick = { viewModel.deleteProfile(profile) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete")
+
+                            if (!profile.isDefault) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                TextButton(
+                                    onClick = { viewModel.setDefault(profile) },
+                                    modifier = Modifier.align(Alignment.End)
+                                ) {
+                                    Text("Set As Default")
+                                }
                             }
                         }
                     }
@@ -95,9 +108,10 @@ fun ProfilesScreen(
     if (showDialog) {
         AddPrinterDialog(
             viewModel = viewModel,
+            hasExistingDefault = profiles.any { it.isDefault },
             onDismiss = { showDialog = false },
-            onConfirm = { name, type, address ->
-                viewModel.addProfile(name, type, address)
+            onConfirm = { name, type, address, isDefault ->
+                viewModel.addProfile(name, type, address, isDefault)
                 showDialog = false
             }
         )
@@ -108,12 +122,14 @@ fun ProfilesScreen(
 @Composable
 fun AddPrinterDialog(
     viewModel: PrinterViewModel,
+    hasExistingDefault: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (String, ConnectionType, String) -> Unit
+    onConfirm: (String, ConnectionType, String, Boolean) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("192.168.1.100") }
     var type by remember { mutableStateOf(ConnectionType.NETWORK) }
+    var setAsDefault by remember(hasExistingDefault) { mutableStateOf(!hasExistingDefault) }
     
     val usbDevices = remember { viewModel.getUsbDevices() }
 
@@ -222,11 +238,45 @@ fun AddPrinterDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (hasExistingDefault) {
+                                Modifier.toggleable(
+                                    value = setAsDefault,
+                                    onValueChange = { setAsDefault = it },
+                                    role = Role.Checkbox
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (hasExistingDefault) {
+                            "Set as default printer"
+                        } else {
+                            "First printer becomes default automatically"
+                        },
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = if (setAsDefault) "Yes" else "No",
+                        color = if (setAsDefault) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(name, type, address) },
+                onClick = { onConfirm(name, type, address, setAsDefault) },
                 enabled = name.isNotBlank() && address.isNotBlank()
             ) {
                 Text("Add")

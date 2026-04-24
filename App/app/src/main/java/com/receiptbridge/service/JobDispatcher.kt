@@ -2,6 +2,7 @@ package com.receiptbridge.service
 
 import com.receiptbridge.data.JobStatus
 import com.receiptbridge.data.PrintJob
+import com.receiptbridge.data.PrintJobFactory
 import com.receiptbridge.data.repository.JobRepository
 import com.receiptbridge.data.repository.PrinterRepository
 import com.receiptbridge.escpos.PrinterDriver
@@ -46,8 +47,11 @@ class JobDispatcher @Inject constructor(
         jobRepository.updateJobStatus(job, JobStatus.PRINTING)
 
         try {
-            val profile = if (job.printerProfileId != null) {
-                printerRepository.getProfileById(job.printerProfileId)
+            val requestedPrinterProfileId = job.printerProfileId
+                ?: runCatching { PrintJobFactory.extractMetadata(job.payloadJson).printerProfileId }.getOrNull()
+
+            val profile = if (requestedPrinterProfileId != null) {
+                printerRepository.getProfileById(requestedPrinterProfileId)
             } else {
                 printerRepository.getDefaultProfile()
             }

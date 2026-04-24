@@ -9,7 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.receiptbridge.R
-import com.receiptbridge.data.PrintJob
+import com.receiptbridge.data.PrintJobFactory
 import com.receiptbridge.data.repository.JobRepository
 import dagger.hilt.android.AndroidEntryPoint
 import io.ktor.serialization.gson.gson
@@ -18,6 +18,7 @@ import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.routing.get
@@ -81,16 +82,21 @@ class WebServer : Service() {
                             call.respond(mapOf("status" to "running"))
                         }
                         post("/print") {
-                            // We receive the raw JSON and save it directly
-                            // Validation happens at processing time or we can parse here to validate
                             val body = call.receiveText()
-                            
-                            // Basic validation: check if it parses? 
-                             // For now, assume valid or catch in processor
-                            
-                            val job = PrintJob(
-                                payloadJson = body
-                            )
+
+                            val job = try {
+                                PrintJobFactory.createFromPayloadJson(body)
+                            } catch (e: IllegalArgumentException) {
+                                call.respond(
+                                    HttpStatusCode.BadRequest,
+                                    mapOf(
+                                        "status" to "error",
+                                        "message" to (e.message ?: "Invalid payload")
+                                    )
+                                )
+                                return@post
+                            }
+
                             jobRepository.createJob(job)
                             
                             call.respond(mapOf(

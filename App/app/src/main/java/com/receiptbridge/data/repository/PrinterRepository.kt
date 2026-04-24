@@ -29,14 +29,27 @@ class PrinterRepository @Inject constructor(
     }
 
     suspend fun saveProfile(profile: PrinterProfile) {
-        if (profile.isDefault) {
+        val profileToSave = if (profile.isDefault) {
+            profile
+        } else if (getDefaultProfile() == null) {
+            profile.copy(isDefault = true)
+        } else {
+            profile
+        }
+
+        if (profileToSave.isDefault) {
             printerProfileDao.clearDefaults()
         }
-        printerProfileDao.insert(profile)
+        printerProfileDao.insert(profileToSave)
     }
 
     suspend fun deleteProfile(profile: PrinterProfile) {
         printerProfileDao.delete(profile)
+        if (profile.isDefault) {
+            val replacement = printerProfileDao.getFirstOtherProfile(profile.id) ?: return
+            printerProfileDao.clearDefaults()
+            printerProfileDao.insert(replacement.copy(isDefault = true))
+        }
     }
 
     suspend fun ensureUsbProfile(deviceAddress: String, displayName: String): Pair<PrinterProfile, Boolean> {

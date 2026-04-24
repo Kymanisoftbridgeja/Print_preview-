@@ -211,12 +211,13 @@ class PrinterViewModel @Inject constructor(
         }
     }
 
-    fun addProfile(name: String, type: ConnectionType, address: String) {
+    fun addProfile(name: String, type: ConnectionType, address: String, isDefault: Boolean) {
         viewModelScope.launch {
             val profile = PrinterProfile(
                 name = name,
                 connectionType = type,
-                address = address
+                address = address,
+                isDefault = isDefault
             )
             repository.saveProfile(profile)
         }

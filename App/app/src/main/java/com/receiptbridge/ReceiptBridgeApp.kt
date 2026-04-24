@@ -8,6 +8,8 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -29,9 +31,16 @@ class ReceiptBridgeApp : Application() {
         super.onCreate()
         jobDispatcher.start()
         applicationScope.launch {
-            settingsRepository.refreshSettings()
-            jobRepository.purgeHistoryOlderThan(settingsRepository.settings.value.keepHistoryDays)
+            while (isActive) {
+                settingsRepository.refreshSettings()
+                jobRepository.purgeHistoryOlderThan(settingsRepository.settings.value.keepHistoryDays)
+                delay(HISTORY_CLEANUP_INTERVAL_MS)
+            }
         }
+    }
+
+    private companion object {
+        const val HISTORY_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000L
     }
 }
 

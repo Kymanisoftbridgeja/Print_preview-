@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.receiptbridge.data.PrintJob
+import com.receiptbridge.data.PrintJobFactory
 import com.receiptbridge.data.repository.JobRepository
 import com.receiptbridge.data.repository.PrinterRepository
 import com.receiptbridge.data.repository.SettingsRepository
@@ -144,7 +145,7 @@ class MainActivity : ComponentActivity() {
                         val json = String(decodedBytes)
                         
                         lifecycleScope.launch {
-                            val job = PrintJob(payloadJson = json)
+                            val job = PrintJobFactory.createFromPayloadJson(json)
                             jobRepository.createJob(job)
                             Toast.makeText(this@MainActivity, "Print Job Queued", Toast.LENGTH_SHORT).show()
                         }

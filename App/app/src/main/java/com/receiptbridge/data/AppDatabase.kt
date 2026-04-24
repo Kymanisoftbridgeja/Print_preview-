@@ -23,6 +23,9 @@ interface PrinterProfileDao {
     @Query("SELECT * FROM printer_profiles WHERE connectionType = :connectionType AND address = :address LIMIT 1")
     suspend fun getByConnectionAndAddress(connectionType: ConnectionType, address: String): PrinterProfile?
 
+    @Query("SELECT * FROM printer_profiles WHERE id != :id ORDER BY name ASC LIMIT 1")
+    suspend fun getFirstOtherProfile(id: String): PrinterProfile?
+
     @Query("SELECT * FROM printer_profiles WHERE isDefault = 1 LIMIT 1")
     suspend fun getDefault(): PrinterProfile?
 
