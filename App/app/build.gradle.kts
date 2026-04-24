@@ -11,10 +11,10 @@ android {
 
     defaultConfig {
         applicationId = "com.receiptbridge"
-        minSdk = 26
+        minSdk = 21
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 10001
+        versionName = "1.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

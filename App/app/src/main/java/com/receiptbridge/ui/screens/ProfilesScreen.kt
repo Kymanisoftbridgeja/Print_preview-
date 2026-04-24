@@ -1,8 +1,18 @@
 package com.receiptbridge.ui.screens
  
+import android.Manifest
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothDevice
-
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,15 +40,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.receiptbridge.data.ConnectionType
 import com.receiptbridge.ui.viewmodel.PrinterViewModel
@@ -126,12 +139,60 @@ fun AddPrinterDialog(
     onDismiss: () -> Unit,
     onConfirm: (String, ConnectionType, String, Boolean) -> Unit
 ) {
+    val context = LocalContext.current
+    val bluetoothAdapter = remember(context) {
+        (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+    }
     var name by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("192.168.1.100") }
     var type by remember { mutableStateOf(ConnectionType.NETWORK) }
     var setAsDefault by remember(hasExistingDefault) { mutableStateOf(!hasExistingDefault) }
+    var pendingBluetoothScan by remember { mutableStateOf(false) }
     
     val usbDevices = remember { viewModel.getUsbDevices() }
+    val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions.values.all { it }) {
+            pendingBluetoothScan = true
+        } else {
+            viewModel.scanBluetooth()
+        }
+    }
+    val enableBluetoothLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        pendingBluetoothScan = true
+    }
+    val openLocationSettingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        pendingBluetoothScan = true
+    }
+    LaunchedEffect(pendingBluetoothScan, bluetoothAdapter, context) {
+        if (!pendingBluetoothScan) {
+            return@LaunchedEffect
+        }
+
+        val missingPermissions = bluetoothScanPermissions().filterNot(context::hasPermission)
+        when {
+            bluetoothAdapter == null -> viewModel.scanBluetooth()
+            missingPermissions.isNotEmpty() -> {
+                pendingBluetoothScan = false
+                bluetoothPermissionLauncher.launch(missingPermissions.toTypedArray())
+            }
+            !bluetoothAdapter.isEnabled -> {
+                pendingBluetoothScan = false
+                enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+            }
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S && !context.isLocationEnabled() -> {
+                pendingBluetoothScan = false
+                openLocationSettingsLauncher.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            }
+            else -> viewModel.scanBluetooth()
+        }
+        pendingBluetoothScan = false
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -204,7 +265,7 @@ fun AddPrinterDialog(
                     val isBluetoothScanning by viewModel.isBluetoothScanning.collectAsState()
                     val bluetoothScanMessage by viewModel.bluetoothScanMessage.collectAsState()
                     Button(
-                        onClick = { viewModel.scanBluetooth() },
+                        onClick = { pendingBluetoothScan = true },
                         enabled = !isBluetoothScanning,
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -327,4 +388,33 @@ fun AddPrinterDialog(
             }
         }
     )
+}
+
+private fun bluetoothScanPermissions(): List<String> {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        listOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT
+        )
+    } else {
+        listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+}
+
+private fun Context.hasPermission(permission: String): Boolean {
+    return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+}
+
+private fun Context.isLocationEnabled(): Boolean {
+    val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        ?: return true
+
+    return runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            locationManager.isLocationEnabled
+        } else {
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }
+    }.getOrDefault(true)
 }
