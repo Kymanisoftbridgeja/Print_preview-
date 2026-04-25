@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.receiptbridge.data.AppSettings
 import com.receiptbridge.data.repository.JobRepository
 import com.receiptbridge.data.repository.SettingsRepository
-import com.receiptbridge.data.repository.SystemPrintRenderSettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -13,11 +12,9 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val repository: SettingsRepository,
-    private val jobRepository: JobRepository,
-    private val systemPrintRenderSettingsRepository: SystemPrintRenderSettingsRepository
+    private val jobRepository: JobRepository
 ) : ViewModel() {
     val settings = repository.settings
-    val systemPrintRenderSettings = systemPrintRenderSettingsRepository.settings
 
     init {
         viewModelScope.launch {
@@ -32,9 +29,5 @@ class SettingsViewModel @Inject constructor(
             repository.updateSettings(sanitized)
             jobRepository.purgeHistoryOlderThan(sanitized.keepHistoryDays)
         }
-    }
-
-    fun updateSystemPrintDarknessPercent(value: Int) {
-        systemPrintRenderSettingsRepository.updateDarknessPercent(value)
     }
 }
