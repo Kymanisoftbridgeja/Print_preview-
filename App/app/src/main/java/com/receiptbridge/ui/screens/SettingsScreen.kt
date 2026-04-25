@@ -12,6 +12,8 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,9 +46,13 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val settings by viewModel.settings.collectAsState()
+    val printerProfiles by viewModel.printerProfiles.collectAsState(initial = emptyList())
+    val systemPrintTestInProgress by viewModel.systemPrintTestInProgress.collectAsState()
+    val systemPrintTestMessage by viewModel.systemPrintTestMessage.collectAsState()
     val systemPrintWidthDraft = remember(settings.systemPrintContentFillPercent) {
         mutableFloatStateOf(settings.systemPrintContentFillPercent.toFloat())
     }
+    val defaultProfile = printerProfiles.firstOrNull { it.isDefault } ?: printerProfiles.firstOrNull()
 
     Column(
         modifier = Modifier
@@ -135,7 +141,7 @@ fun SettingsScreen(
         StepperSetting(
             title = "Adjust Width",
             valueText = "${settings.systemPrintContentFillPercent}%",
-            supportingText = "Higher values make Android print-service receipts use more paper width while staying centered.",
+            supportingText = "Higher values make Android print-service receipts use more paper width while staying centered. Use the test below to verify the change.",
             canDecrease = settings.systemPrintContentFillPercent > MIN_SYSTEM_PRINT_CONTENT_FILL_PERCENT,
             canIncrease = settings.systemPrintContentFillPercent < MAX_SYSTEM_PRINT_CONTENT_FILL_PERCENT,
             onDecrease = {
@@ -153,6 +159,53 @@ fun SettingsScreen(
                 viewModel.updateSystemPrintContentFillPercent(updated)
             }
         )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Settings Print Test",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                if (defaultProfile == null) {
+                    Text(
+                        text = "No saved printer available. Add a printer first, then come back here to test the width setting.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    Text(
+                        text = "Uses: ${defaultProfile.name} (${defaultProfile.paperWidthMm} mm)",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        text = "This test prints through the Android print-service raster path, so it reflects the width control above.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            viewModel.clearSystemPrintTestMessage()
+                            viewModel.runSystemPrintSettingsTest()
+                        },
+                        enabled = !systemPrintTestInProgress,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (systemPrintTestInProgress) "Printing Test..." else "Print Width Test")
+                    }
+                }
+
+                systemPrintTestMessage?.let { message ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = message,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
         
         Spacer(modifier = Modifier.height(24.dp))
         

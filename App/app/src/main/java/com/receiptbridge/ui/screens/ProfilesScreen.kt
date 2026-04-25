@@ -129,7 +129,7 @@ fun ProfilesScreen(
                                 onClick = { viewModel.queueTestPrint(profile) },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Test Print")
+                                Text("Connection Test")
                             }
 
                             if (!profile.isDefault) {

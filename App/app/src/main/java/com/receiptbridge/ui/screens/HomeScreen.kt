@@ -78,7 +78,7 @@ fun HomeScreen(
                         onClick = { viewModel.queueTestPrint(defaultProfile) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Test Default Printer")
+                        Text("Connection Test")
                     }
                 }
                 printerActionMessage?.let { message ->

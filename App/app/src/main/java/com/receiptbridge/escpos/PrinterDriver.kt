@@ -4,9 +4,12 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import com.google.gson.Gson
@@ -21,6 +24,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
 import javax.inject.Inject
@@ -172,6 +178,26 @@ class PrinterDriver @Inject constructor(
         }
     }
 
+    suspend fun printSystemSettingsTest(profile: PrinterProfile) {
+        withContext(Dispatchers.IO) {
+            val pdfFile = createSystemSettingsTestPdf(profile)
+            try {
+                ParcelFileDescriptor.open(
+                    pdfFile,
+                    ParcelFileDescriptor.MODE_READ_ONLY
+                ).use { parcelFileDescriptor ->
+                    printPdfDocument(
+                        documentData = parcelFileDescriptor,
+                        profile = profile,
+                        copies = 1
+                    )
+                }
+            } finally {
+                pdfFile.delete()
+            }
+        }
+    }
+
     private fun createSeekablePdfCopy(documentData: ParcelFileDescriptor): File {
         val spoolFile = File.createTempFile("receiptbridge-print-", ".pdf", context.cacheDir)
         try {
@@ -192,6 +218,173 @@ class PrinterDriver @Inject constructor(
         } catch (error: Exception) {
             spoolFile.delete()
             throw error
+        }
+    }
+
+    private fun createSystemSettingsTestPdf(profile: PrinterProfile): File {
+        val pdfFile = File.createTempFile("receiptbridge-settings-test-", ".pdf", context.cacheDir)
+        val pageWidth = 1200
+        val pageHeight = 2000
+        val receiptWidth = 660
+        val receiptLeft = (pageWidth - receiptWidth) / 2
+        val receiptRight = receiptLeft + receiptWidth
+        val document = PdfDocument()
+
+        try {
+            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
+            val page = document.startPage(pageInfo)
+            val canvas = page.canvas
+
+            val backgroundPaint = Paint().apply { color = Color.WHITE }
+            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(230, 230, 230)
+                style = Paint.Style.STROKE
+                strokeWidth = 2f
+            }
+            val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                style = Paint.Style.STROKE
+                strokeWidth = 8f
+            }
+            val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                style = Paint.Style.FILL
+            }
+            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                textSize = 42f
+                typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+                textAlign = Paint.Align.CENTER
+            }
+            val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                textSize = 28f
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+                textAlign = Paint.Align.LEFT
+            }
+            val rightAlignedBodyPaint = Paint(bodyPaint).apply {
+                textAlign = Paint.Align.RIGHT
+            }
+            val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                textSize = 22f
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+                textAlign = Paint.Align.LEFT
+            }
+            val centeredBodyPaint = Paint(bodyPaint).apply {
+                textAlign = Paint.Align.CENTER
+            }
+            val leftAlignedTitlePaint = Paint(titlePaint).apply {
+                textAlign = Paint.Align.LEFT
+                textSize = 38f
+            }
+            val rightAlignedTitlePaint = Paint(titlePaint).apply {
+                textAlign = Paint.Align.RIGHT
+                textSize = 38f
+            }
+
+            canvas.drawColor(Color.WHITE)
+            canvas.drawRect(0f, 0f, pageWidth.toFloat(), pageHeight.toFloat(), backgroundPaint)
+            canvas.drawRect(
+                receiptLeft.toFloat(),
+                80f,
+                receiptRight.toFloat(),
+                1600f,
+                borderPaint
+            )
+
+            val centerX = pageWidth / 2f
+            canvas.drawOval(centerX - 130f, 130f, centerX + 130f, 250f, logoPaint)
+            canvas.drawText("ReceiptBridge", centerX, 225f, titlePaint)
+            canvas.drawText("Width Settings Test", centerX, 315f, centeredBodyPaint)
+
+            var y = 400f
+            val leftTextX = receiptLeft + 36f
+            val rightTextX = receiptRight - 36f
+            val rowStep = 70f
+
+            val lines = listOf(
+                "Printer: ${profile.name}",
+                "Paper: ${profile.paperWidthMm} mm",
+                "Path: Android print-service raster",
+                "This test should grow/shrink with the width setting."
+            )
+            lines.forEach { line ->
+                canvas.drawText(line, leftTextX, y, bodyPaint)
+                y += 52f
+            }
+
+            y += 20f
+            canvas.drawLine(leftTextX, y, rightTextX, y, fillPaint)
+            y += 60f
+
+            val items = listOf(
+                Triple("1  Goldie 18pk Plain Tx", "960.00", "B / Box"),
+                Triple("1  Burger Bread", "255.00", "S / Single"),
+                Triple("1  Cheese Bread Tx", "124.35", "S / Single"),
+                Triple("1  Cinnamon Loaf Tx", "1260.00", "S / Units")
+            )
+
+            items.forEach { (label, price, subline) ->
+                canvas.drawText(label, leftTextX, y, bodyPaint)
+                canvas.drawText(price, rightTextX, y, rightAlignedBodyPaint)
+                y += 36f
+                canvas.drawText(subline, leftTextX + 32f, y, smallPaint)
+                y += rowStep
+            }
+
+            y += 12f
+            canvas.drawLine(leftTextX, y, rightTextX, y, fillPaint)
+            y += 56f
+            canvas.drawText("Subtotal", leftTextX, y, bodyPaint)
+            canvas.drawText("2,599.35", rightTextX, y, rightAlignedBodyPaint)
+            y += 48f
+            canvas.drawText("Tax", leftTextX, y, bodyPaint)
+            canvas.drawText("389.90", rightTextX, y, rightAlignedBodyPaint)
+            y += 56f
+            canvas.drawText("Total", leftTextX, y, leftAlignedTitlePaint)
+            canvas.drawText("2,989.25", rightTextX, y, rightAlignedTitlePaint)
+
+            y += 110f
+            val footerCenterX = pageWidth / 2f
+            val stampPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                textSize = 24f
+                typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+                textAlign = Paint.Align.CENTER
+            }
+            canvas.drawText(
+                "Generated ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())}",
+                footerCenterX,
+                y,
+                centeredBodyPaint
+            )
+            y += 46f
+            canvas.drawText(
+                "Use Settings > Receipt Content Width, then print this again.",
+                footerCenterX,
+                y,
+                stampPaint
+            )
+            y += 60f
+            canvas.drawText(
+                "The logo, totals, and side margins should visibly change.",
+                footerCenterX,
+                y,
+                stampPaint
+            )
+
+            document.finishPage(page)
+            FileOutputStream(pdfFile).use { output ->
+                document.writeTo(output)
+                output.fd.sync()
+            }
+            return pdfFile
+        } catch (error: Exception) {
+            pdfFile.delete()
+            throw error
+        } finally {
+            document.close()
         }
     }
 

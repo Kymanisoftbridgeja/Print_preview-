@@ -558,7 +558,8 @@ class PrinterViewModel @Inject constructor(
                 payloadJson = buildTestPrintPayload(profile)
             )
             jobRepository.createJob(testJob)
-            _printerActionMessage.value = "Test print queued for ${profile.name}. Check Print Queue for status."
+            _printerActionMessage.value =
+                "Connection test queued for ${profile.name}. Use Settings > Print Width Test for width tuning."
         }
     }
 
@@ -580,19 +581,19 @@ class PrinterViewModel @Inject constructor(
     private fun buildTestPrintPayload(profile: PrinterProfile): String {
         val root = JsonObject().apply {
             addProperty("printer_profile_id", profile.id)
-            addProperty("copies", 1)
-            add("content", JsonObject().apply {
-                addProperty("type", "escpos_blocks")
-                add("blocks", JsonArray().apply {
-                    addCommand("align", "center")
-                    addCommand("text", "ReceiptBridge Test Print")
+                addProperty("copies", 1)
+                add("content", JsonObject().apply {
+                    addProperty("type", "escpos_blocks")
+                    add("blocks", JsonArray().apply {
+                        addCommand("align", "center")
+                    addCommand("text", "ReceiptBridge Connection Test")
                     addCommand("text", profile.name)
                     addCommand("align", "left")
                     addCommand("text", "Paper: ${profile.paperWidthMm} mm")
                     addCommand("text", "Connection: ${profile.connectionType}")
                     addCommand("text", "Address: ${profile.address}")
                     addCommand("text", "If this prints, the saved printer profile is working.")
-                    addCommand("text", "Queued from the app test action.")
+                    addCommand("text", "This does not use the Settings width control.")
                 })
             })
         }
