@@ -3,7 +3,11 @@ package com.receiptbridge.ui.viewmodel
 import android.annotation.SuppressLint
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.bluetooth.BluetoothDevice as BtDevice
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -49,7 +53,10 @@ class PrinterViewModel @Inject constructor(
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
     private val bluetoothAdapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
     private var bluetoothScanReceiver: BroadcastReceiver? = null
+    private var bluetoothLeScanCallback: ScanCallback? = null
     private var bluetoothScanTimeoutJob: Job? = null
+    private var isClassicDiscoveryRunning = false
+    private var isBleDiscoveryRunning = false
 
     val profiles = repository.allProfiles
     
@@ -70,42 +77,35 @@ class PrinterViewModel @Inject constructor(
     }
 
     @SuppressLint("MissingPermission")
+    fun refreshBluetoothDevices() {
+        getReadyBluetoothAdapter() ?: return
+        stopBluetoothScan()
+
+        val bondedDevices = getBondedBluetoothDevices()
+        _foundBtDevices.value = bondedDevices
+        _bluetoothScanMessage.value = when {
+            bondedDevices.isEmpty() -> {
+                "No paired Bluetooth printers found yet. Pair the printer in Android Bluetooth settings, then tap Refresh Paired."
+            }
+            bondedDevices.any(::isLikelyPrinter) -> {
+                "Showing paired Bluetooth printers. Use Scan Nearby if the printer is still in pairing mode."
+            }
+            else -> {
+                "Showing paired Bluetooth devices. If your printer is missing, pair it in Android Bluetooth settings, then refresh."
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     fun scanBluetooth() {
-        val adapter = bluetoothAdapter
-        if (adapter == null) {
-            _isBluetoothScanning.value = false
-            _foundBtDevices.value = emptyList()
-            _bluetoothScanMessage.value = "Bluetooth is not available on this device."
-            return
-        }
-
-        if (missingBluetoothPermissions().isNotEmpty()) {
-            _isBluetoothScanning.value = false
-            _foundBtDevices.value = emptyList()
-            _bluetoothScanMessage.value = buildBluetoothPermissionMessage()
-            return
-        }
-
-        if (!adapter.isEnabled) {
-            _isBluetoothScanning.value = false
-            _foundBtDevices.value = emptyList()
-            _bluetoothScanMessage.value = "Turn on Bluetooth and try again."
-            return
-        }
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && !isLocationEnabled()) {
-            _isBluetoothScanning.value = false
-            _foundBtDevices.value = emptyList()
-            _bluetoothScanMessage.value = "Turn on Location to discover Bluetooth devices on Android 11 and lower."
-            return
-        }
+        val adapter = getReadyBluetoothAdapter() ?: return
 
         stopBluetoothScan()
         _foundBtDevices.value = getBondedBluetoothDevices()
         _bluetoothScanMessage.value = if (_foundBtDevices.value.isEmpty()) {
-            "Searching for nearby Bluetooth devices..."
+            "Searching for nearby Bluetooth printers and devices. Pair the printer in Android Bluetooth settings if it does not appear."
         } else {
-            "Paired devices loaded. Searching for more nearby Bluetooth devices..."
+            "Paired devices loaded. Searching for more nearby Bluetooth printers and devices..."
         }
 
         val receiver = object : BroadcastReceiver() {
@@ -115,7 +115,10 @@ class PrinterViewModel @Inject constructor(
                         intent.getBluetoothDevice()?.let(::addBluetoothDevice)
                     }
                     BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
-                        finishBluetoothScan()
+                        isClassicDiscoveryRunning = false
+                        if (!isBleDiscoveryRunning) {
+                            finishBluetoothScan(cancelDiscovery = false)
+                        }
                     }
                 }
             }
@@ -140,8 +143,9 @@ class PrinterViewModel @Inject constructor(
         }
 
         bluetoothScanReceiver = receiver
-        val discoveryStarted = runCatching { adapter.startDiscovery() }.getOrDefault(false)
-        if (!discoveryStarted) {
+        isClassicDiscoveryRunning = runCatching { adapter.startDiscovery() }.getOrDefault(false)
+        isBleDiscoveryRunning = startBluetoothLeScan(adapter)
+        if (!isClassicDiscoveryRunning && !isBleDiscoveryRunning) {
             stopBluetoothScan(cancelDiscovery = false)
             _bluetoothScanMessage.value = if (_foundBtDevices.value.isEmpty()) {
                 "Bluetooth scan could not start. Make sure the printer is powered on and in pairing mode."
@@ -154,9 +158,7 @@ class PrinterViewModel @Inject constructor(
         _isBluetoothScanning.value = true
         bluetoothScanTimeoutJob = viewModelScope.launch {
             delay(BLUETOOTH_SCAN_TIMEOUT_MS)
-            if (hasBluetoothScanAccess() && adapter.isDiscovering) {
-                runCatching { adapter.cancelDiscovery() }
-            }
+            finishBluetoothScan()
         }
     }
 
@@ -287,12 +289,15 @@ class PrinterViewModel @Inject constructor(
     }
 
     @SuppressLint("MissingPermission")
-    private fun finishBluetoothScan() {
-        stopBluetoothScan(cancelDiscovery = false)
-        _bluetoothScanMessage.value = if (_foundBtDevices.value.isEmpty()) {
-            "No Bluetooth devices found. Make sure the printer is on and in pairing mode."
+    private fun finishBluetoothScan(cancelDiscovery: Boolean = true) {
+        stopBluetoothScan(cancelDiscovery = cancelDiscovery)
+        val foundDevices = _foundBtDevices.value
+        _bluetoothScanMessage.value = if (foundDevices.isEmpty()) {
+            "No Bluetooth devices found. Make sure the printer is on and in pairing mode, or pair it first in Android Bluetooth settings."
+        } else if (foundDevices.any(::isLikelyPrinter)) {
+            "Bluetooth scan finished. Printer-like devices are listed first. Tap the printer you want to save."
         } else {
-            "Bluetooth scan finished."
+            "Bluetooth scan finished. If your printer still does not appear, pair it in Android Bluetooth settings first, then scan again."
         }
     }
 
@@ -305,6 +310,12 @@ class PrinterViewModel @Inject constructor(
         if (cancelDiscovery && adapter != null && hasBluetoothScanAccess() && adapter.isDiscovering) {
             runCatching { adapter.cancelDiscovery() }
         }
+        bluetoothLeScanCallback?.let { callback ->
+            runCatching { adapter?.bluetoothLeScanner?.stopScan(callback) }
+        }
+        bluetoothLeScanCallback = null
+        isClassicDiscoveryRunning = false
+        isBleDiscoveryRunning = false
 
         bluetoothScanReceiver?.let { receiver ->
             runCatching { context.unregisterReceiver(receiver) }
@@ -313,11 +324,51 @@ class PrinterViewModel @Inject constructor(
         _isBluetoothScanning.value = false
     }
 
+    @SuppressLint("MissingPermission")
+    private fun startBluetoothLeScan(adapter: BluetoothAdapter): Boolean {
+        val scanner = adapter.bluetoothLeScanner ?: return false
+        val callback = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                result.device?.let(::addBluetoothDevice)
+            }
+
+            override fun onBatchScanResults(results: MutableList<ScanResult>) {
+                results.forEach { result ->
+                    result.device?.let(::addBluetoothDevice)
+                }
+            }
+
+            override fun onScanFailed(errorCode: Int) {
+                bluetoothLeScanCallback = null
+                isBleDiscoveryRunning = false
+                if (!isClassicDiscoveryRunning) {
+                    stopBluetoothScan(cancelDiscovery = false)
+                    _bluetoothScanMessage.value = "Bluetooth scan could not start. Make sure the printer is powered on and nearby."
+                }
+            }
+        }
+
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+
+        val started = runCatching {
+            scanner.startScan(null, settings, callback)
+            true
+        }.getOrDefault(false)
+        if (started) {
+            bluetoothLeScanCallback = callback
+        }
+        return started
+    }
+
     private fun sortBluetoothDevices(devices: List<BtDevice>): List<BtDevice> {
         return devices
             .distinctBy { it.address }
             .sortedWith(
-                compareBy<BtDevice> { bluetoothDeviceName(it).ifBlank { it.address } }
+                compareByDescending<BtDevice> { isLikelyPrinter(it) }
+                    .thenByDescending { it.bondState == BtDevice.BOND_BONDED }
+                    .thenBy { bluetoothDeviceName(it).ifBlank { it.address } }
                     .thenBy { it.address }
             )
     }
@@ -325,6 +376,50 @@ class PrinterViewModel @Inject constructor(
     @SuppressLint("MissingPermission")
     private fun bluetoothDeviceName(device: BtDevice): String {
         return runCatching { device.name.orEmpty().trim() }.getOrDefault("")
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun isLikelyPrinter(device: BtDevice): Boolean {
+        val bluetoothClass = device.bluetoothClass
+        if (bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.IMAGING) {
+            return true
+        }
+
+        val deviceName = bluetoothDeviceName(device).lowercase()
+        return PRINTER_NAME_KEYWORDS.any(deviceName::contains)
+    }
+
+    private fun getReadyBluetoothAdapter(): BluetoothAdapter? {
+        val adapter = bluetoothAdapter
+        if (adapter == null) {
+            _isBluetoothScanning.value = false
+            _foundBtDevices.value = emptyList()
+            _bluetoothScanMessage.value = "Bluetooth is not available on this device."
+            return null
+        }
+
+        if (missingBluetoothPermissions().isNotEmpty()) {
+            _isBluetoothScanning.value = false
+            _foundBtDevices.value = emptyList()
+            _bluetoothScanMessage.value = buildBluetoothPermissionMessage()
+            return null
+        }
+
+        if (!adapter.isEnabled) {
+            _isBluetoothScanning.value = false
+            _foundBtDevices.value = emptyList()
+            _bluetoothScanMessage.value = "Turn on Bluetooth and try again."
+            return null
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && !isLocationEnabled()) {
+            _isBluetoothScanning.value = false
+            _foundBtDevices.value = emptyList()
+            _bluetoothScanMessage.value = "Turn on Location to discover Bluetooth devices on Android 11 and lower."
+            return null
+        }
+
+        return adapter
     }
 
     private fun missingBluetoothPermissions(): List<String> {
@@ -424,5 +519,19 @@ class PrinterViewModel @Inject constructor(
     private companion object {
         const val BLUETOOTH_SCAN_TIMEOUT_MS = 20_000L
         const val MAX_SCAN_HOSTS = 512L
+        val PRINTER_NAME_KEYWORDS = listOf(
+            "printer",
+            "woosim",
+            "wsp",
+            "pos",
+            "epson",
+            "tm-",
+            "bixolon",
+            "zebra",
+            "star",
+            "sewoo",
+            "citizen",
+            "rongta"
+        )
     }
 }

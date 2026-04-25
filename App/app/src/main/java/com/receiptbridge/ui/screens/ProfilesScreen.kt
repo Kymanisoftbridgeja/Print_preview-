@@ -147,51 +147,66 @@ fun AddPrinterDialog(
     var address by remember { mutableStateOf("192.168.1.100") }
     var type by remember { mutableStateOf(ConnectionType.NETWORK) }
     var setAsDefault by remember(hasExistingDefault) { mutableStateOf(!hasExistingDefault) }
-    var pendingBluetoothScan by remember { mutableStateOf(false) }
+    var pendingBluetoothAction by remember { mutableStateOf<BluetoothAction?>(null) }
     
     val usbDevices = remember { viewModel.getUsbDevices() }
+    var runBluetoothAction by remember { mutableStateOf<(BluetoothAction) -> Unit>({}) }
     val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        if (permissions.values.all { it }) {
-            pendingBluetoothScan = true
+        val action = pendingBluetoothAction
+        pendingBluetoothAction = null
+        if (permissions.values.all { it } && action != null) {
+            runBluetoothAction(action)
         } else {
-            viewModel.scanBluetooth()
+            viewModel.refreshBluetoothDevices()
         }
     }
     val enableBluetoothLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        pendingBluetoothScan = true
+        pendingBluetoothAction?.let(runBluetoothAction)
     }
     val openLocationSettingsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        pendingBluetoothScan = true
+        pendingBluetoothAction?.let(runBluetoothAction)
     }
-    LaunchedEffect(pendingBluetoothScan, bluetoothAdapter, context) {
-        if (!pendingBluetoothScan) {
-            return@LaunchedEffect
-        }
-
+    val openBluetoothSettingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        runBluetoothAction(BluetoothAction.REFRESH)
+    }
+    runBluetoothAction = { action ->
         val missingPermissions = bluetoothScanPermissions().filterNot(context::hasPermission)
         when {
-            bluetoothAdapter == null -> viewModel.scanBluetooth()
+            bluetoothAdapter == null -> viewModel.refreshBluetoothDevices()
             missingPermissions.isNotEmpty() -> {
-                pendingBluetoothScan = false
+                pendingBluetoothAction = action
                 bluetoothPermissionLauncher.launch(missingPermissions.toTypedArray())
             }
             !bluetoothAdapter.isEnabled -> {
-                pendingBluetoothScan = false
+                pendingBluetoothAction = action
                 enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
             }
             Build.VERSION.SDK_INT < Build.VERSION_CODES.S && !context.isLocationEnabled() -> {
-                pendingBluetoothScan = false
+                pendingBluetoothAction = action
                 openLocationSettingsLauncher.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
             }
-            else -> viewModel.scanBluetooth()
+            action == BluetoothAction.REFRESH -> {
+                pendingBluetoothAction = null
+                viewModel.refreshBluetoothDevices()
+            }
+            else -> {
+                pendingBluetoothAction = null
+                viewModel.scanBluetooth()
+            }
         }
-        pendingBluetoothScan = false
+    }
+    LaunchedEffect(type) {
+        if (type == ConnectionType.BLUETOOTH) {
+            runBluetoothAction(BluetoothAction.REFRESH)
+        }
     }
 
     AlertDialog(
@@ -264,12 +279,29 @@ fun AddPrinterDialog(
                     val btDevices by viewModel.foundBtDevices.collectAsState()
                     val isBluetoothScanning by viewModel.isBluetoothScanning.collectAsState()
                     val bluetoothScanMessage by viewModel.bluetoothScanMessage.collectAsState()
-                    Button(
-                        onClick = { pendingBluetoothScan = true },
-                        enabled = !isBluetoothScanning,
-                        modifier = Modifier.fillMaxWidth()
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = { runBluetoothAction(BluetoothAction.REFRESH) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Refresh Paired")
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = { runBluetoothAction(BluetoothAction.SCAN) },
+                            enabled = !isBluetoothScanning,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (isBluetoothScanning) "Scanning..." else "Scan All Bluetooth")
+                        }
+                    }
+                    TextButton(
+                        onClick = {
+                            openBluetoothSettingsLauncher.launch(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                        },
+                        modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text(if (isBluetoothScanning) "Scanning..." else "Scan Bluetooth")
+                        Text("Open Bluetooth Settings")
                     }
                     bluetoothScanMessage?.let { message ->
                         Spacer(modifier = Modifier.height(8.dp))
@@ -281,6 +313,14 @@ fun AddPrinterDialog(
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             }
+                        )
+                    }
+                    if (btDevices.isEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Scan All Bluetooth looks for paired, nearby classic Bluetooth, and BLE devices. Pair Woosim and other printers in Android Bluetooth settings if they still do not appear.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     LazyColumn(modifier = Modifier.height(100.dp)) {
@@ -417,4 +457,9 @@ private fun Context.isLocationEnabled(): Boolean {
                 locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         }
     }.getOrDefault(true)
+}
+
+private enum class BluetoothAction {
+    REFRESH,
+    SCAN
 }
