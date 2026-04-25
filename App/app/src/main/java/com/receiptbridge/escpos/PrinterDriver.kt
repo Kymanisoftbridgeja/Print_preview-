@@ -222,7 +222,7 @@ class PrinterDriver @Inject constructor(
                 postScale(scale, scale)
             }
             page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-            val trimmedBitmap = trimVerticalWhitespace(bitmap)
+            val trimmedBitmap = trimContentBounds(bitmap)
             try {
                 EscPosImageEncoder.encodeBitmap(trimmedBitmap, targetWidth)
             } finally {
@@ -235,47 +235,54 @@ class PrinterDriver @Inject constructor(
         }
     }
 
-    private fun trimVerticalWhitespace(bitmap: Bitmap): Bitmap {
+    private fun trimContentBounds(bitmap: Bitmap): Bitmap {
         val rowBuffer = IntArray(bitmap.width)
-        var top = -1
+        var top = bitmap.height
         var bottom = -1
+        var left = bitmap.width
+        var right = -1
 
         for (y in 0 until bitmap.height) {
             bitmap.getPixels(rowBuffer, 0, bitmap.width, 0, y, bitmap.width, 1)
-            if (rowContainsContent(rowBuffer)) {
-                top = y
-                break
+            val contentRange = findContentRange(rowBuffer)
+            if (contentRange != null) {
+                if (y < top) {
+                    top = y
+                }
+                if (y > bottom) {
+                    bottom = y
+                }
+                if (contentRange.first < left) {
+                    left = contentRange.first
+                }
+                if (contentRange.last > right) {
+                    right = contentRange.last
+                }
             }
         }
 
-        if (top == -1) {
-            return bitmap
-        }
-
-        for (y in bitmap.height - 1 downTo top) {
-            bitmap.getPixels(rowBuffer, 0, bitmap.width, 0, y, bitmap.width, 1)
-            if (rowContainsContent(rowBuffer)) {
-                bottom = y
-                break
-            }
-        }
-
-        if (bottom == -1) {
+        if (bottom == -1 || right == -1) {
             return bitmap
         }
 
         val cropTop = (top - RECEIPT_VERTICAL_TRIM_PADDING_PX).coerceAtLeast(0)
         val cropBottom = (bottom + RECEIPT_VERTICAL_TRIM_PADDING_PX).coerceAtMost(bitmap.height - 1)
+        val cropLeft = (left - RECEIPT_HORIZONTAL_TRIM_PADDING_PX).coerceAtLeast(0)
+        val cropRight = (right + RECEIPT_HORIZONTAL_TRIM_PADDING_PX).coerceAtMost(bitmap.width - 1)
         val croppedHeight = cropBottom - cropTop + 1
-        if (cropTop == 0 && croppedHeight == bitmap.height) {
+        val croppedWidth = cropRight - cropLeft + 1
+        if (cropTop == 0 && cropLeft == 0 && croppedHeight == bitmap.height && croppedWidth == bitmap.width) {
             return bitmap
         }
 
-        return Bitmap.createBitmap(bitmap, 0, cropTop, bitmap.width, croppedHeight)
+        return Bitmap.createBitmap(bitmap, cropLeft, cropTop, croppedWidth, croppedHeight)
     }
 
-    private fun rowContainsContent(rowPixels: IntArray): Boolean {
-        for (pixel in rowPixels) {
+    private fun findContentRange(rowPixels: IntArray): IntRange? {
+        var firstContentIndex = -1
+        var lastContentIndex = -1
+        for (index in rowPixels.indices) {
+            val pixel = rowPixels[index]
             val alpha = (pixel ushr 24) and 0xFF
             if (alpha <= RECEIPT_MIN_ALPHA_THRESHOLD) {
                 continue
@@ -286,10 +293,13 @@ class PrinterDriver @Inject constructor(
             val blue = pixel and 0xFF
             val grayscale = (red * 0.299f) + (green * 0.587f) + (blue * 0.114f)
             if (grayscale < RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD) {
-                return true
+                if (firstContentIndex == -1) {
+                    firstContentIndex = index
+                }
+                lastContentIndex = index
             }
         }
-        return false
+        return if (firstContentIndex == -1) null else firstContentIndex..lastContentIndex
     }
 
     private fun processBlock(builder: EscPosBuilder, block: PrintBlock, profile: PrinterProfile) {
@@ -394,6 +404,7 @@ class PrinterDriver @Inject constructor(
 
     private companion object {
         const val RECEIPT_VERTICAL_TRIM_PADDING_PX = 8
+        const val RECEIPT_HORIZONTAL_TRIM_PADDING_PX = 12
         const val RECEIPT_MIN_ALPHA_THRESHOLD = 16
         const val RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD = 245f
     }
