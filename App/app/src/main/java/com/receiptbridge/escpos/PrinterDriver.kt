@@ -14,6 +14,7 @@ import com.receiptbridge.data.ConnectionType
 import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.PrinterProfile
 import com.receiptbridge.data.defaultImageWidthForPaperWidthMm
+import com.receiptbridge.data.sanitizeSystemPrintContentFillPercent
 import com.receiptbridge.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -115,6 +116,8 @@ class PrinterDriver @Inject constructor(
         copies: Int = 1
     ) {
         withContext(Dispatchers.IO) {
+            settingsRepository.refreshSettings()
+            val settings = settingsRepository.settings.value
             val seekablePdfFile = createSeekablePdfCopy(documentData)
             try {
                 ParcelFileDescriptor.open(
@@ -129,7 +132,11 @@ class PrinterDriver @Inject constructor(
                                 connection.write(EscPosBuilder().reset().build())
                                 for (pageIndex in 0 until renderer.pageCount) {
                                     renderer.openPage(pageIndex).use { page ->
-                                        renderPdfPageStrips(page, profile).forEach { rasterImage ->
+                                        renderPdfPageStrips(
+                                            page = page,
+                                            profile = profile,
+                                            contentFillPercent = settings.systemPrintContentFillPercent
+                                        ).forEach { rasterImage ->
                                             val pageData = EscPosBuilder()
                                                 .align("left")
                                                 .imageColumnFormat(
@@ -210,9 +217,13 @@ class PrinterDriver @Inject constructor(
 
     private fun renderPdfPageStrips(
         page: PdfRenderer.Page,
-        profile: PrinterProfile
+        profile: PrinterProfile,
+        contentFillPercent: Int
     ): List<EscPosRasterImage> {
         val targetWidth = defaultImageWidthForPaperWidthMm(profile.paperWidthMm)
+        val sanitizedFillPercent = sanitizeSystemPrintContentFillPercent(contentFillPercent)
+        val targetContentWidth = ((targetWidth * (sanitizedFillPercent / 100f)).roundToInt())
+            .coerceIn(1, targetWidth)
         val renderWidth = targetWidth * SYSTEM_PRINT_RENDER_SCALE_FACTOR
         val scale = renderWidth.toFloat() / page.width.toFloat()
         val renderHeight = (page.height * scale).toInt().coerceAtLeast(1)
@@ -224,11 +235,11 @@ class PrinterDriver @Inject constructor(
             }
             page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
             val contentBounds = detectContentBounds(bitmap)
-            val trimmedBitmap = trimVerticalWhitespace(bitmap, contentBounds)
+            val croppedBitmap = cropToContentBounds(bitmap, contentBounds)
             try {
                 val rasterPage = EscPosImageEncoder.encodeBitmap(
-                    bitmap = trimmedBitmap,
-                    targetWidth = targetWidth,
+                    bitmap = croppedBitmap,
+                    targetWidth = targetContentWidth,
                     options = EscPosEncodingOptions(
                         grayscaleThreshold = SYSTEM_PRINT_FIXED_GRAYSCALE_THRESHOLD,
                         bolden = true,
@@ -237,12 +248,12 @@ class PrinterDriver @Inject constructor(
                     )
                 )
                 splitRasterBands(
-                    shiftRasterImageToCenter(rasterPage, bitmap.width, targetWidth, contentBounds),
+                    centerRasterImage(rasterPage, targetWidth),
                     SYSTEM_PRINT_RASTER_BAND_HEIGHT_PX
                 )
             } finally {
-                if (trimmedBitmap !== bitmap) {
-                    trimmedBitmap.recycle()
+                if (croppedBitmap !== bitmap) {
+                    croppedBitmap.recycle()
                 }
             }
         } finally {
@@ -276,45 +287,31 @@ class PrinterDriver @Inject constructor(
         return bands
     }
 
-    private fun shiftRasterImageToCenter(
+    private fun centerRasterImage(
         rasterImage: EscPosRasterImage,
-        sourcePageWidth: Int,
-        targetWidth: Int,
-        contentBounds: ContentBounds?
+        targetWidth: Int
     ): EscPosRasterImage {
-        if (contentBounds == null || rasterImage.width != targetWidth || sourcePageWidth <= 0) {
+        if (rasterImage.width >= targetWidth) {
             return rasterImage
         }
 
-        val scaledLeft = ((contentBounds.left.toFloat() / sourcePageWidth.toFloat()) * targetWidth)
-            .roundToInt()
-            .coerceIn(0, targetWidth - 1)
-        val scaledRight = ((contentBounds.right.toFloat() / sourcePageWidth.toFloat()) * targetWidth)
-            .roundToInt()
-            .coerceIn(scaledLeft, targetWidth - 1)
-        val currentCenter = (scaledLeft + scaledRight) / 2f
-        var shiftPixels = (targetWidth / 2f - currentCenter).roundToInt()
-        shiftPixels = shiftPixels.coerceIn(-scaledLeft, (targetWidth - 1) - scaledRight)
-
-        if (shiftPixels == 0) {
-            return rasterImage
-        }
-
+        val sourceWidthBytes = (rasterImage.width + 7) / 8
         val widthBytes = (targetWidth + 7) / 8
-        val shiftedBytes = ByteArray(widthBytes * rasterImage.height)
+        val leftPaddingPixels = ((targetWidth - rasterImage.width) / 2).coerceAtLeast(0)
+        val centeredBytes = ByteArray(widthBytes * rasterImage.height)
 
         for (y in 0 until rasterImage.height) {
-            for (x in 0 until targetWidth) {
-                if (!isRasterPixelBlack(rasterImage.rasterBytes, widthBytes, x, y, rasterImage.height)) {
+            for (x in 0 until rasterImage.width) {
+                if (!isRasterPixelBlack(rasterImage.rasterBytes, sourceWidthBytes, x, y, rasterImage.height)) {
                     continue
                 }
 
                 setRasterPixelBlack(
-                    shiftedBytes,
+                    centeredBytes,
                     widthBytes,
                     targetWidth,
                     rasterImage.height,
-                    x + shiftPixels,
+                    x + leftPaddingPixels,
                     y
                 )
             }
@@ -323,7 +320,7 @@ class PrinterDriver @Inject constructor(
         return EscPosRasterImage(
             width = targetWidth,
             height = rasterImage.height,
-            rasterBytes = shiftedBytes
+            rasterBytes = centeredBytes
         )
     }
 
@@ -384,7 +381,7 @@ class PrinterDriver @Inject constructor(
         )
     }
 
-    private fun trimVerticalWhitespace(
+    private fun cropToContentBounds(
         bitmap: Bitmap,
         contentBounds: ContentBounds?
     ): Bitmap {
@@ -392,11 +389,22 @@ class PrinterDriver @Inject constructor(
             return bitmap
         }
 
-        if (contentBounds.top == 0 && contentBounds.bottom == bitmap.height - 1) {
+        if (
+            contentBounds.left == 0 &&
+            contentBounds.top == 0 &&
+            contentBounds.right == bitmap.width - 1 &&
+            contentBounds.bottom == bitmap.height - 1
+        ) {
             return bitmap
         }
 
-        return Bitmap.createBitmap(bitmap, 0, contentBounds.top, bitmap.width, contentBounds.height)
+        return Bitmap.createBitmap(
+            bitmap,
+            contentBounds.left,
+            contentBounds.top,
+            contentBounds.width,
+            contentBounds.height
+        )
     }
 
     private fun isDarkContentPixel(pixel: Int): Boolean {
@@ -555,7 +563,7 @@ class PrinterDriver @Inject constructor(
 
     private companion object {
         const val RECEIPT_VERTICAL_TRIM_PADDING_PX = 8
-        const val RECEIPT_HORIZONTAL_TRIM_PADDING_PX = 12
+        const val RECEIPT_HORIZONTAL_TRIM_PADDING_PX = 20
         const val RECEIPT_MIN_ALPHA_THRESHOLD = 16
         const val RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD = 210f
         const val SYSTEM_PRINT_RENDER_SCALE_FACTOR = 4
@@ -564,7 +572,7 @@ class PrinterDriver @Inject constructor(
         const val CONTENT_ROW_DARK_PIXEL_DIVISOR = 250
         const val CONTENT_COLUMN_DARK_PIXEL_DIVISOR = 300
         const val BASE_ROW_ACTIVITY_RATIO = 0.12f
-        const val BASE_COLUMN_ACTIVITY_RATIO = 0.04f
+        const val BASE_COLUMN_ACTIVITY_RATIO = 0.02f
     }
 
     private data class ContentBounds(

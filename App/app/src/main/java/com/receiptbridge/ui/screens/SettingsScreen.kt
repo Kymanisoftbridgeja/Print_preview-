@@ -1,5 +1,6 @@
 package com.receiptbridge.ui.screens
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,21 +9,34 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.receiptbridge.data.MAX_KEEP_HISTORY_DAYS
+import com.receiptbridge.data.MAX_SYSTEM_PRINT_CONTENT_FILL_PERCENT
+import com.receiptbridge.data.MIN_KEEP_HISTORY_DAYS
+import com.receiptbridge.data.MIN_SYSTEM_PRINT_CONTENT_FILL_PERCENT
+import com.receiptbridge.data.sanitizeKeepHistoryDays
+import com.receiptbridge.data.sanitizeSystemPrintContentFillPercent
 import com.receiptbridge.ui.viewmodel.SettingsViewModel
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(
@@ -30,6 +44,9 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val settings by viewModel.settings.collectAsState()
+    val systemPrintWidthDraft = remember(settings.systemPrintContentFillPercent) {
+        mutableFloatStateOf(settings.systemPrintContentFillPercent.toFloat())
+    }
 
     Column(
         modifier = Modifier
@@ -58,19 +75,22 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        TextField(
-            value = settings.keepHistoryDays.toString(),
-            onValueChange = { input ->
-                if (input.all(Char::isDigit)) {
-                    viewModel.updateSettings(
-                        settings.copy(keepHistoryDays = input.toIntOrNull() ?: 0)
-                    )
-                }
+        StepperSetting(
+            title = "Keep History",
+            valueText = "${settings.keepHistoryDays} days",
+            supportingText = "Completed and failed jobs older than this are removed automatically.",
+            canDecrease = settings.keepHistoryDays > MIN_KEEP_HISTORY_DAYS,
+            canIncrease = settings.keepHistoryDays < MAX_KEEP_HISTORY_DAYS,
+            onDecrease = {
+                viewModel.updateKeepHistoryDays(
+                    sanitizeKeepHistoryDays(settings.keepHistoryDays - KEEP_HISTORY_STEP_DAYS)
+                )
             },
-            label = { Text("Keep History (Days)") },
-            supportingText = { Text("Completed and failed jobs older than this are removed automatically.") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth()
+            onIncrease = {
+                viewModel.updateKeepHistoryDays(
+                    sanitizeKeepHistoryDays(settings.keepHistoryDays + KEEP_HISTORY_STEP_DAYS)
+                )
+            }
         )
         
         Spacer(modifier = Modifier.height(24.dp))
@@ -79,6 +99,59 @@ fun SettingsScreen(
             title = "Auto-print on USB Connect",
             checked = settings.autoPrintOnConnect,
             onCheckedChange = { viewModel.updateSettings(settings.copy(autoPrintOnConnect = it)) }
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text("Android Print Service", style = MaterialTheme.typography.titleMedium)
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            "Receipt Content Width",
+            style = MaterialTheme.typography.bodyLarge
+        )
+
+        Text(
+            "${systemPrintWidthDraft.floatValue.roundToInt()}%",
+            style = MaterialTheme.typography.titleMedium
+        )
+
+        Slider(
+            value = systemPrintWidthDraft.floatValue,
+            onValueChange = { value ->
+                systemPrintWidthDraft.floatValue = value.roundToInt().toFloat()
+            },
+            onValueChangeFinished = {
+                viewModel.updateSystemPrintContentFillPercent(
+                    sanitizeSystemPrintContentFillPercent(systemPrintWidthDraft.floatValue.roundToInt())
+                )
+            },
+            valueRange = MIN_SYSTEM_PRINT_CONTENT_FILL_PERCENT.toFloat()..MAX_SYSTEM_PRINT_CONTENT_FILL_PERCENT.toFloat(),
+            steps = (MAX_SYSTEM_PRINT_CONTENT_FILL_PERCENT - MIN_SYSTEM_PRINT_CONTENT_FILL_PERCENT) - 1,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        StepperSetting(
+            title = "Adjust Width",
+            valueText = "${settings.systemPrintContentFillPercent}%",
+            supportingText = "Higher values make Android print-service receipts use more paper width while staying centered.",
+            canDecrease = settings.systemPrintContentFillPercent > MIN_SYSTEM_PRINT_CONTENT_FILL_PERCENT,
+            canIncrease = settings.systemPrintContentFillPercent < MAX_SYSTEM_PRINT_CONTENT_FILL_PERCENT,
+            onDecrease = {
+                val updated = sanitizeSystemPrintContentFillPercent(
+                    settings.systemPrintContentFillPercent - SYSTEM_PRINT_WIDTH_STEP_PERCENT
+                )
+                systemPrintWidthDraft.floatValue = updated.toFloat()
+                viewModel.updateSystemPrintContentFillPercent(updated)
+            },
+            onIncrease = {
+                val updated = sanitizeSystemPrintContentFillPercent(
+                    settings.systemPrintContentFillPercent + SYSTEM_PRINT_WIDTH_STEP_PERCENT
+                )
+                systemPrintWidthDraft.floatValue = updated.toFloat()
+                viewModel.updateSystemPrintContentFillPercent(updated)
+            }
         )
         
         Spacer(modifier = Modifier.height(24.dp))
@@ -116,3 +189,52 @@ fun SettingToggle(
         )
     }
 }
+
+@Composable
+fun StepperSetting(
+    title: String,
+    valueText: String,
+    supportingText: String,
+    canDecrease: Boolean,
+    canIncrease: Boolean,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(title, style = MaterialTheme.typography.bodyLarge)
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = onDecrease,
+                    enabled = canDecrease
+                ) {
+                    Icon(Icons.Default.Remove, contentDescription = "Decrease $title")
+                }
+                Text(
+                    valueText,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                IconButton(
+                    onClick = onIncrease,
+                    enabled = canIncrease
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Increase $title")
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            supportingText,
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+private const val KEEP_HISTORY_STEP_DAYS = 5
+private const val SYSTEM_PRINT_WIDTH_STEP_PERCENT = 5

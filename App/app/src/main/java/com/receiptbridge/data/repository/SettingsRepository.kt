@@ -2,6 +2,7 @@ package com.receiptbridge.data.repository
 
 import com.receiptbridge.data.AppSettings
 import com.receiptbridge.data.SettingsDao
+import com.receiptbridge.data.sanitized
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
@@ -17,7 +18,11 @@ class SettingsRepository @Inject constructor(
     suspend fun refreshSettings() {
         val dbSettings = settingsDao.getSettings()
         if (dbSettings != null) {
-            _settings.emit(dbSettings)
+            val sanitized = dbSettings.sanitized()
+            if (sanitized != dbSettings) {
+                settingsDao.saveSettings(sanitized)
+            }
+            _settings.emit(sanitized)
         } else {
             // Initialize with defaults if empty
             val default = AppSettings()
@@ -27,7 +32,8 @@ class SettingsRepository @Inject constructor(
     }
 
     suspend fun updateSettings(newSettings: AppSettings) {
-        settingsDao.saveSettings(newSettings)
-        _settings.emit(newSettings)
+        val sanitized = newSettings.sanitized()
+        settingsDao.saveSettings(sanitized)
+        _settings.emit(sanitized)
     }
 }

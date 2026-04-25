@@ -3,6 +3,9 @@ package com.receiptbridge.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.receiptbridge.data.AppSettings
+import com.receiptbridge.data.sanitizeKeepHistoryDays
+import com.receiptbridge.data.sanitizeSystemPrintContentFillPercent
+import com.receiptbridge.data.sanitized
 import com.receiptbridge.data.repository.JobRepository
 import com.receiptbridge.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,9 +28,21 @@ class SettingsViewModel @Inject constructor(
 
     fun updateSettings(newSettings: AppSettings) {
         viewModelScope.launch {
-            val sanitized = newSettings.copy(keepHistoryDays = newSettings.keepHistoryDays.coerceAtLeast(0))
+            val sanitized = newSettings.sanitized()
             repository.updateSettings(sanitized)
             jobRepository.purgeHistoryOlderThan(sanitized.keepHistoryDays)
         }
+    }
+
+    fun updateKeepHistoryDays(value: Int) {
+        updateSettings(settings.value.copy(keepHistoryDays = sanitizeKeepHistoryDays(value)))
+    }
+
+    fun updateSystemPrintContentFillPercent(value: Int) {
+        updateSettings(
+            settings.value.copy(
+                systemPrintContentFillPercent = sanitizeSystemPrintContentFillPercent(value)
+            )
+        )
     }
 }
