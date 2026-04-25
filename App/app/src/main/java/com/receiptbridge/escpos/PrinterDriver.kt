@@ -131,13 +131,12 @@ class PrinterDriver @Inject constructor(
                                     renderer.openPage(pageIndex).use { page ->
                                         renderPdfPageStrips(page, profile).forEach { rasterImage ->
                                             val pageData = EscPosBuilder()
-                                                .align("center")
+                                                .align("left")
                                                 .imageColumnFormat(
                                                     rasterImage.width,
                                                     rasterImage.height,
                                                     rasterImage.rasterBytes
                                                 )
-                                                .newLine()
                                                 .build()
                                             connection.write(pageData)
                                         }
@@ -225,16 +224,22 @@ class PrinterDriver @Inject constructor(
             }
             page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
             val contentBounds = detectContentBounds(bitmap)
-            val trimmedBitmap = contentBounds?.let { bounds ->
-                Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width, bounds.height)
-            } ?: bitmap
-            val targetContentWidth = contentBounds?.let { bounds ->
-                ((bounds.width.toFloat() / bitmap.width.toFloat()) * targetWidth)
-                    .roundToInt()
-                    .coerceIn(1, targetWidth)
-            } ?: targetWidth
+            val trimmedBitmap = trimVerticalWhitespace(bitmap, contentBounds)
             try {
-                buildRasterBands(trimmedBitmap, targetWidth, targetContentWidth)
+                val rasterPage = EscPosImageEncoder.encodeBitmap(
+                    bitmap = trimmedBitmap,
+                    targetWidth = targetWidth,
+                    options = EscPosEncodingOptions(
+                        grayscaleThreshold = SYSTEM_PRINT_FIXED_GRAYSCALE_THRESHOLD,
+                        bolden = true,
+                        scaleWithFilter = true,
+                        allowUpscale = false
+                    )
+                )
+                splitRasterBands(
+                    shiftRasterImageToCenter(rasterPage, bitmap.width, targetWidth, contentBounds),
+                    SYSTEM_PRINT_RASTER_BAND_HEIGHT_PX
+                )
             } finally {
                 if (trimmedBitmap !== bitmap) {
                     trimmedBitmap.recycle()
@@ -245,78 +250,80 @@ class PrinterDriver @Inject constructor(
         }
     }
 
-    private fun buildRasterBands(
-        bitmap: Bitmap,
-        targetWidth: Int,
-        targetContentWidth: Int
+    private fun splitRasterBands(
+        rasterImage: EscPosRasterImage,
+        maxBandHeight: Int
     ): List<EscPosRasterImage> {
-        val safeTargetContentWidth = targetContentWidth.coerceIn(1, targetWidth)
-        val scaledHeight = ((bitmap.height * (safeTargetContentWidth.toFloat() / bitmap.width.toFloat()))
-            .toInt()
-            .coerceAtLeast(1))
-        val bandCount = max(1, (scaledHeight + SYSTEM_PRINT_BAND_HEIGHT_PX - 1) / SYSTEM_PRINT_BAND_HEIGHT_PX)
-        val renderBandHeight = max(1, bitmap.height / bandCount)
-        val bands = mutableListOf<EscPosRasterImage>()
+        if (rasterImage.height <= maxBandHeight) {
+            return listOf(rasterImage)
+        }
 
+        val widthBytes = (rasterImage.width + 7) / 8
+        val bands = mutableListOf<EscPosRasterImage>()
         var top = 0
-        while (top < bitmap.height) {
-            val bandHeight = minOf(renderBandHeight, bitmap.height - top)
-            val bandBitmap = Bitmap.createBitmap(bitmap, 0, top, bitmap.width, bandHeight)
-            val trimmedBandBitmap = trimVerticalWhitespace(bandBitmap)
-            try {
-                if (trimmedBandBitmap != null) {
-                    val rasterBand = EscPosImageEncoder.encodeBitmap(
-                        bitmap = trimmedBandBitmap,
-                        targetWidth = safeTargetContentWidth,
-                        options = EscPosEncodingOptions(
-                            grayscaleThreshold = SYSTEM_PRINT_FIXED_GRAYSCALE_THRESHOLD,
-                            bolden = true,
-                            scaleWithFilter = true,
-                            allowUpscale = false
-                        )
-                    )
-                    bands += centerRasterImage(rasterBand, targetWidth)
-                }
-            } finally {
-                if (trimmedBandBitmap != null && trimmedBandBitmap !== bandBitmap) {
-                    trimmedBandBitmap.recycle()
-                }
-                bandBitmap.recycle()
-            }
+        while (top < rasterImage.height) {
+            val bandHeight = minOf(maxBandHeight, rasterImage.height - top)
+            val startIndex = top * widthBytes
+            val endIndex = startIndex + (bandHeight * widthBytes)
+            bands += EscPosRasterImage(
+                width = rasterImage.width,
+                height = bandHeight,
+                rasterBytes = rasterImage.rasterBytes.copyOfRange(startIndex, endIndex)
+            )
             top += bandHeight
         }
 
         return bands
     }
 
-    private fun centerRasterImage(
+    private fun shiftRasterImageToCenter(
         rasterImage: EscPosRasterImage,
-        targetWidth: Int
+        sourcePageWidth: Int,
+        targetWidth: Int,
+        contentBounds: ContentBounds?
     ): EscPosRasterImage {
-        if (rasterImage.width >= targetWidth) {
+        if (contentBounds == null || rasterImage.width != targetWidth || sourcePageWidth <= 0) {
             return rasterImage
         }
 
-        val sourceWidthBytes = (rasterImage.width + 7) / 8
-        val targetWidthBytes = (targetWidth + 7) / 8
-        val leftPaddingPixels = ((targetWidth - rasterImage.width) / 2).coerceAtLeast(0)
-        val centeredBytes = ByteArray(targetWidthBytes * rasterImage.height)
+        val scaledLeft = ((contentBounds.left.toFloat() / sourcePageWidth.toFloat()) * targetWidth)
+            .roundToInt()
+            .coerceIn(0, targetWidth - 1)
+        val scaledRight = ((contentBounds.right.toFloat() / sourcePageWidth.toFloat()) * targetWidth)
+            .roundToInt()
+            .coerceIn(scaledLeft, targetWidth - 1)
+        val currentCenter = (scaledLeft + scaledRight) / 2f
+        var shiftPixels = (targetWidth / 2f - currentCenter).roundToInt()
+        shiftPixels = shiftPixels.coerceIn(-scaledLeft, (targetWidth - 1) - scaledRight)
+
+        if (shiftPixels == 0) {
+            return rasterImage
+        }
+
+        val widthBytes = (targetWidth + 7) / 8
+        val shiftedBytes = ByteArray(widthBytes * rasterImage.height)
 
         for (y in 0 until rasterImage.height) {
-            for (x in 0 until rasterImage.width) {
-                if (!isRasterPixelBlack(rasterImage.rasterBytes, sourceWidthBytes, x, y, rasterImage.height)) {
+            for (x in 0 until targetWidth) {
+                if (!isRasterPixelBlack(rasterImage.rasterBytes, widthBytes, x, y, rasterImage.height)) {
                     continue
                 }
 
-                val centeredX = x + leftPaddingPixels
-                setRasterPixelBlack(centeredBytes, targetWidthBytes, targetWidth, rasterImage.height, centeredX, y)
+                setRasterPixelBlack(
+                    shiftedBytes,
+                    widthBytes,
+                    targetWidth,
+                    rasterImage.height,
+                    x + shiftPixels,
+                    y
+                )
             }
         }
 
         return EscPosRasterImage(
             width = targetWidth,
             height = rasterImage.height,
-            rasterBytes = centeredBytes
+            rasterBytes = shiftedBytes
         )
     }
 
@@ -377,8 +384,14 @@ class PrinterDriver @Inject constructor(
         )
     }
 
-    private fun trimVerticalWhitespace(bitmap: Bitmap): Bitmap? {
-        val contentBounds = detectContentBounds(bitmap) ?: return null
+    private fun trimVerticalWhitespace(
+        bitmap: Bitmap,
+        contentBounds: ContentBounds?
+    ): Bitmap {
+        if (contentBounds == null) {
+            return bitmap
+        }
+
         if (contentBounds.top == 0 && contentBounds.bottom == bitmap.height - 1) {
             return bitmap
         }
@@ -547,11 +560,11 @@ class PrinterDriver @Inject constructor(
         const val RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD = 210f
         const val SYSTEM_PRINT_RENDER_SCALE_FACTOR = 4
         const val SYSTEM_PRINT_FIXED_GRAYSCALE_THRESHOLD = 232f
-        const val SYSTEM_PRINT_BAND_HEIGHT_PX = 256
+        const val SYSTEM_PRINT_RASTER_BAND_HEIGHT_PX = 240
         const val CONTENT_ROW_DARK_PIXEL_DIVISOR = 250
         const val CONTENT_COLUMN_DARK_PIXEL_DIVISOR = 300
         const val BASE_ROW_ACTIVITY_RATIO = 0.12f
-        const val BASE_COLUMN_ACTIVITY_RATIO = 0.12f
+        const val BASE_COLUMN_ACTIVITY_RATIO = 0.04f
     }
 
     private data class ContentBounds(
