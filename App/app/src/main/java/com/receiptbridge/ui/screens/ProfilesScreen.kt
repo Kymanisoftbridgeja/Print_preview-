@@ -54,6 +54,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.receiptbridge.data.ConnectionType
+import com.receiptbridge.data.PAPER_WIDTH_58_MM
+import com.receiptbridge.data.PAPER_WIDTH_80_MM
 import com.receiptbridge.ui.viewmodel.PrinterViewModel
 
 @Composable
@@ -104,6 +106,7 @@ fun ProfilesScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(profile.name, style = MaterialTheme.typography.titleMedium)
                                     Text("${profile.connectionType} - ${profile.address}")
+                                    Text("Receipt: ${profile.paperWidthMm} mm")
                                     if (profile.isDefault) {
                                         Text("DEFAULT", color = MaterialTheme.colorScheme.primary)
                                     }
@@ -112,6 +115,14 @@ fun ProfilesScreen(
                                     Icon(Icons.Default.Delete, contentDescription = "Delete")
                                 }
                             }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            ReceiptSizeSelector(
+                                selectedPaperWidthMm = profile.paperWidthMm,
+                                onSelect = { selectedPaperWidth ->
+                                    viewModel.updatePaperWidth(profile, selectedPaperWidth)
+                                }
+                            )
 
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
@@ -142,8 +153,8 @@ fun ProfilesScreen(
             viewModel = viewModel,
             hasExistingDefault = profiles.any { it.isDefault },
             onDismiss = { showDialog = false },
-            onConfirm = { name, type, address, isDefault ->
-                viewModel.addProfile(name, type, address, isDefault)
+            onConfirm = { name, type, address, isDefault, paperWidthMm ->
+                viewModel.addProfile(name, type, address, isDefault, paperWidthMm)
                 showDialog = false
             }
         )
@@ -156,7 +167,7 @@ fun AddPrinterDialog(
     viewModel: PrinterViewModel,
     hasExistingDefault: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (String, ConnectionType, String, Boolean) -> Unit
+    onConfirm: (String, ConnectionType, String, Boolean, Int) -> Unit
 ) {
     val context = LocalContext.current
     val bluetoothAdapter = remember(context) {
@@ -165,6 +176,7 @@ fun AddPrinterDialog(
     var name by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("192.168.1.100") }
     var type by remember { mutableStateOf(ConnectionType.NETWORK) }
+    var paperWidthMm by remember { mutableStateOf(PAPER_WIDTH_80_MM) }
     var setAsDefault by remember(hasExistingDefault) { mutableStateOf(!hasExistingDefault) }
     var pendingBluetoothAction by remember { mutableStateOf<BluetoothAction?>(null) }
     
@@ -399,6 +411,16 @@ fun AddPrinterDialog(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
+                Text("Receipt Width", style = MaterialTheme.typography.labelMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                ReceiptSizeSelector(
+                    selectedPaperWidthMm = paperWidthMm,
+                    onSelect = { selectedPaperWidth ->
+                        paperWidthMm = selectedPaperWidth
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Row(
                     modifier = Modifier
@@ -435,7 +457,7 @@ fun AddPrinterDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(name, type, address, setAsDefault) },
+                onClick = { onConfirm(name, type, address, setAsDefault, paperWidthMm) },
                 enabled = name.isNotBlank() && address.isNotBlank()
             ) {
                 Text("Add")
@@ -481,4 +503,28 @@ private fun Context.isLocationEnabled(): Boolean {
 private enum class BluetoothAction {
     REFRESH,
     SCAN
+}
+
+@Composable
+private fun ReceiptSizeSelector(
+    selectedPaperWidthMm: Int,
+    onSelect: (Int) -> Unit
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Button(
+            onClick = { onSelect(PAPER_WIDTH_80_MM) },
+            enabled = selectedPaperWidthMm != PAPER_WIDTH_80_MM,
+            modifier = Modifier.weight(1f)
+        ) {
+            Text("80 mm")
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+            onClick = { onSelect(PAPER_WIDTH_58_MM) },
+            enabled = selectedPaperWidthMm != PAPER_WIDTH_58_MM,
+            modifier = Modifier.weight(1f)
+        ) {
+            Text("58 mm")
+        }
+    }
 }

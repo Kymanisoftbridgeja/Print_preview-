@@ -82,7 +82,7 @@ fun QueueScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Job ID: ${job.id.take(8)}", style = MaterialTheme.typography.titleMedium)
-                            Text("Printer: ${job.resolvePrinterName(profiles, defaultProfile)}")
+                            Text("Printer: ${job.resolvePrinterLabel(profiles, defaultProfile)}")
                             Text("Status: ${job.status}")
                             Text(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(job.timestamp)))
                             if (job.status == JobStatus.FAILED) {
@@ -107,7 +107,7 @@ fun QueueScreen(
     }
 }
 
-private fun PrintJob.resolvePrinterName(
+private fun PrintJob.resolvePrinterLabel(
     profiles: List<PrinterProfile>,
     defaultProfile: PrinterProfile?
 ): String {
@@ -115,9 +115,9 @@ private fun PrintJob.resolvePrinterName(
         profiles.firstOrNull { it.id == id }
     }
     return when {
-        matchedProfile != null -> matchedProfile.name
+        matchedProfile != null -> "${matchedProfile.name} (${matchedProfile.paperWidthMm} mm)"
         printerProfileId != null -> "Saved printer unavailable"
-        defaultProfile != null -> "${defaultProfile.name} (default)"
+        defaultProfile != null -> "${defaultProfile.name} (${defaultProfile.paperWidthMm} mm, default)"
         else -> "Default printer not set"
     }
 }

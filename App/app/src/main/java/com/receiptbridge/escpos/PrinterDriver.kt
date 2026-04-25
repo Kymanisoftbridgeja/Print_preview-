@@ -7,6 +7,7 @@ import com.google.gson.Gson
 import com.receiptbridge.data.ConnectionType
 import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.PrinterProfile
+import com.receiptbridge.data.defaultImageWidthForPaperWidthMm
 import com.receiptbridge.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +48,7 @@ class PrinterDriver @Inject constructor(
                     if (header.startsWith("base64:")) {
                          val rasterImage = EscPosImageEncoder.decodeBase64Image(
                              base64Data = header,
-                             targetWidth = profile.charactersPerLine * 8
+                             targetWidth = defaultImageWidthForPaperWidthMm(profile.paperWidthMm)
                          )
                          if (rasterImage != null) {
                              builder.align("center").image(
@@ -175,7 +176,7 @@ class PrinterDriver @Inject constructor(
             }
             "image" -> {
                 val base64Data = block.value as? String ?: return
-                val width = block.left?.toIntOrNull() ?: 384
+                val width = block.left?.toIntOrNull() ?: defaultImageWidthForPaperWidthMm(profile.paperWidthMm)
                 val height = block.right?.toIntOrNull()
                 val rasterImage = EscPosImageEncoder.decodeBase64Image(base64Data, width, height)
 

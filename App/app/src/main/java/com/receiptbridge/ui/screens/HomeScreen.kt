@@ -71,6 +71,7 @@ fun HomeScreen(
                 } else {
                     Text(defaultProfile.name, style = MaterialTheme.typography.titleMedium)
                     Text("${defaultProfile.connectionType} - ${defaultProfile.address}")
+                    Text("Receipt width: ${defaultProfile.paperWidthMm} mm")
                     Text("Saved printers: ${profiles.size}")
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(

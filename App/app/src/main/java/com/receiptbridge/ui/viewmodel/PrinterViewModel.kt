@@ -24,8 +24,11 @@ import androidx.lifecycle.viewModelScope
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.receiptbridge.data.ConnectionType
+import com.receiptbridge.data.PAPER_WIDTH_58_MM
 import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.PrinterProfile
+import com.receiptbridge.data.defaultCharactersPerLineForPaperWidthMm
+import com.receiptbridge.data.normalizePaperWidthMm
 import com.receiptbridge.data.repository.JobRepository
 import com.receiptbridge.data.repository.PrinterRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -489,20 +492,29 @@ class PrinterViewModel @Inject constructor(
         }
     }
 
-    fun addProfile(name: String, type: ConnectionType, address: String, isDefault: Boolean) {
+    fun addProfile(
+        name: String,
+        type: ConnectionType,
+        address: String,
+        isDefault: Boolean,
+        paperWidthMm: Int
+    ) {
         viewModelScope.launch {
             val hadDefaultBeforeSave = repository.getDefaultProfile() != null
+            val normalizedPaperWidth = normalizePaperWidthMm(paperWidthMm)
             val profile = PrinterProfile(
                 name = name,
                 connectionType = type,
                 address = address,
+                paperWidthMm = normalizedPaperWidth,
+                charactersPerLine = defaultCharactersPerLineForPaperWidthMm(normalizedPaperWidth),
                 isDefault = isDefault
             )
             repository.saveProfile(profile)
             _printerActionMessage.value = if (isDefault || !hadDefaultBeforeSave) {
-                "Printer saved and ready: $name is now the active printer."
+                "Printer saved and ready: $name is now the active printer (${normalizedPaperWidth} mm)."
             } else {
-                "Printer saved: $name"
+                "Printer saved: $name (${normalizedPaperWidth} mm)"
             }
         }
     }
@@ -518,6 +530,24 @@ class PrinterViewModel @Inject constructor(
         viewModelScope.launch {
              repository.saveProfile(profile.copy(isDefault = true))
              _printerActionMessage.value = "Default printer set to ${profile.name}"
+        }
+    }
+
+    fun updatePaperWidth(profile: PrinterProfile, paperWidthMm: Int) {
+        viewModelScope.launch {
+            val normalizedPaperWidth = normalizePaperWidthMm(paperWidthMm)
+            if (profile.paperWidthMm == normalizedPaperWidth) {
+                return@launch
+            }
+
+            repository.saveProfile(
+                profile.copy(
+                    paperWidthMm = normalizedPaperWidth,
+                    charactersPerLine = defaultCharactersPerLineForPaperWidthMm(normalizedPaperWidth)
+                )
+            )
+            _printerActionMessage.value =
+                "Receipt size for ${profile.name} set to ${normalizedPaperWidth} mm."
         }
     }
 
@@ -558,6 +588,7 @@ class PrinterViewModel @Inject constructor(
                     addCommand("text", "ReceiptBridge Test Print")
                     addCommand("text", profile.name)
                     addCommand("align", "left")
+                    addCommand("text", "Paper: ${profile.paperWidthMm} mm")
                     addCommand("text", "Connection: ${profile.connectionType}")
                     addCommand("text", "Address: ${profile.address}")
                     addCommand("text", "If this prints, the saved printer profile is working.")
