@@ -18,6 +18,8 @@ import com.receiptbridge.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -111,47 +113,78 @@ class PrinterDriver @Inject constructor(
         copies: Int = 1
     ) {
         withContext(Dispatchers.IO) {
-            documentData.use { parcelFileDescriptor ->
-                PdfRenderer(parcelFileDescriptor).use { renderer ->
-                    val connection = createConnection(profile)
-                    try {
-                        connection.connect()
-                        repeat(copies.coerceAtLeast(1)) {
-                            connection.write(EscPosBuilder().reset().build())
-                            for (pageIndex in 0 until renderer.pageCount) {
-                                renderer.openPage(pageIndex).use { page ->
-                                    val rasterImage = renderPdfPage(page, profile)
-                                    val pageData = EscPosBuilder()
-                                        .align("center")
-                                        .image(
-                                            rasterImage.width,
-                                            rasterImage.height,
-                                            rasterImage.rasterBytes
-                                        )
-                                        .newLine()
-                                        .apply {
-                                            if (pageIndex < renderer.pageCount - 1) {
-                                                feed(1)
+            val seekablePdfFile = createSeekablePdfCopy(documentData)
+            try {
+                ParcelFileDescriptor.open(
+                    seekablePdfFile,
+                    ParcelFileDescriptor.MODE_READ_ONLY
+                ).use { parcelFileDescriptor ->
+                    PdfRenderer(parcelFileDescriptor).use { renderer ->
+                        val connection = createConnection(profile)
+                        try {
+                            connection.connect()
+                            repeat(copies.coerceAtLeast(1)) {
+                                connection.write(EscPosBuilder().reset().build())
+                                for (pageIndex in 0 until renderer.pageCount) {
+                                    renderer.openPage(pageIndex).use { page ->
+                                        val rasterImage = renderPdfPage(page, profile)
+                                        val pageData = EscPosBuilder()
+                                            .align("center")
+                                            .image(
+                                                rasterImage.width,
+                                                rasterImage.height,
+                                                rasterImage.rasterBytes
+                                            )
+                                            .newLine()
+                                            .apply {
+                                                if (pageIndex < renderer.pageCount - 1) {
+                                                    feed(1)
+                                                }
                                             }
-                                        }
-                                        .build()
-                                    connection.write(pageData)
+                                            .build()
+                                        connection.write(pageData)
+                                    }
                                 }
-                            }
 
-                            val finalizeBuilder = EscPosBuilder()
-                            if (profile.autoCut) {
-                                finalizeBuilder.feed(profile.feedLines).cut()
-                            } else {
-                                finalizeBuilder.feed(profile.feedLines)
+                                val finalizeBuilder = EscPosBuilder()
+                                if (profile.autoCut) {
+                                    finalizeBuilder.feed(profile.feedLines).cut()
+                                } else {
+                                    finalizeBuilder.feed(profile.feedLines)
+                                }
+                                connection.write(finalizeBuilder.build())
                             }
-                            connection.write(finalizeBuilder.build())
+                        } finally {
+                            connection.disconnect()
                         }
-                    } finally {
-                        connection.disconnect()
+                    }
+                }
+            } finally {
+                seekablePdfFile.delete()
+            }
+        }
+    }
+
+    private fun createSeekablePdfCopy(documentData: ParcelFileDescriptor): File {
+        val spoolFile = File.createTempFile("receiptbridge-print-", ".pdf", context.cacheDir)
+        try {
+            documentData.use { sourceDescriptor ->
+                ParcelFileDescriptor.AutoCloseInputStream(sourceDescriptor).use { input ->
+                    FileOutputStream(spoolFile).use { output ->
+                        input.copyTo(output)
+                        output.fd.sync()
                     }
                 }
             }
+
+            if (spoolFile.length() <= 0L) {
+                throw IllegalStateException("Android print service delivered an empty PDF document.")
+            }
+
+            return spoolFile
+        } catch (error: Exception) {
+            spoolFile.delete()
+            throw error
         }
     }
 
