@@ -95,7 +95,7 @@ class Converters {
     fun toJobStatus(value: String): JobStatus = JobStatus.valueOf(value)
 }
 
-@Database(entities = [PrinterProfile::class, PrintJob::class, AppSettings::class], version = 3, exportSchema = false)
+@Database(entities = [PrinterProfile::class, PrintJob::class, AppSettings::class], version = 4, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun printerProfileDao(): PrinterProfileDao

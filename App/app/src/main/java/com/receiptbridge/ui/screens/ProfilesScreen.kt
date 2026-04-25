@@ -54,8 +54,16 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.receiptbridge.data.ConnectionType
+import com.receiptbridge.data.DEFAULT_PRINT_AREA_DOTS_58_MM
+import com.receiptbridge.data.DEFAULT_PRINT_AREA_DOTS_80_MM
+import com.receiptbridge.data.MAX_PRINT_AREA_DOTS
+import com.receiptbridge.data.MIN_PRINT_AREA_DOTS
 import com.receiptbridge.data.PAPER_WIDTH_58_MM
 import com.receiptbridge.data.PAPER_WIDTH_80_MM
+import com.receiptbridge.data.PRINT_AREA_DOTS_STEP
+import com.receiptbridge.data.defaultPrintAreaDotsForPaperWidthMm
+import com.receiptbridge.data.resolvedPrintAreaDots
+import com.receiptbridge.data.sanitizePrintAreaDots
 import com.receiptbridge.ui.viewmodel.PrinterViewModel
 
 @Composable
@@ -106,7 +114,7 @@ fun ProfilesScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(profile.name, style = MaterialTheme.typography.titleMedium)
                                     Text("${profile.connectionType} - ${profile.address}")
-                                    Text("Receipt: ${profile.paperWidthMm} mm")
+                                    Text("Receipt: ${profile.paperWidthMm} mm - ${profile.resolvedPrintAreaDots()} dots")
                                     if (profile.isDefault) {
                                         Text("DEFAULT", color = MaterialTheme.colorScheme.primary)
                                     }
@@ -119,8 +127,17 @@ fun ProfilesScreen(
                             Spacer(modifier = Modifier.height(12.dp))
                             ReceiptSizeSelector(
                                 selectedPaperWidthMm = profile.paperWidthMm,
-                                onSelect = { selectedPaperWidth ->
+                                onSelect = { selectedPaperWidth -> 
                                     viewModel.updatePaperWidth(profile, selectedPaperWidth)
+                                }
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            PrintAreaDotsEditor(
+                                currentPrintAreaDots = profile.resolvedPrintAreaDots(),
+                                paperWidthMm = profile.paperWidthMm,
+                                onChange = { updatedPrintAreaDots ->
+                                    viewModel.updatePrintAreaDots(profile, updatedPrintAreaDots)
                                 }
                             )
 
@@ -153,8 +170,8 @@ fun ProfilesScreen(
             viewModel = viewModel,
             hasExistingDefault = profiles.any { it.isDefault },
             onDismiss = { showDialog = false },
-            onConfirm = { name, type, address, isDefault, paperWidthMm ->
-                viewModel.addProfile(name, type, address, isDefault, paperWidthMm)
+            onConfirm = { name, type, address, isDefault, paperWidthMm, printAreaDots ->
+                viewModel.addProfile(name, type, address, isDefault, paperWidthMm, printAreaDots)
                 showDialog = false
             }
         )
@@ -167,7 +184,7 @@ fun AddPrinterDialog(
     viewModel: PrinterViewModel,
     hasExistingDefault: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (String, ConnectionType, String, Boolean, Int) -> Unit
+    onConfirm: (String, ConnectionType, String, Boolean, Int, Int) -> Unit
 ) {
     val context = LocalContext.current
     val bluetoothAdapter = remember(context) {
@@ -177,6 +194,7 @@ fun AddPrinterDialog(
     var address by remember { mutableStateOf("192.168.1.100") }
     var type by remember { mutableStateOf(ConnectionType.NETWORK) }
     var paperWidthMm by remember { mutableStateOf(PAPER_WIDTH_80_MM) }
+    var printAreaDots by remember { mutableStateOf(defaultPrintAreaDotsForPaperWidthMm(PAPER_WIDTH_80_MM)) }
     var setAsDefault by remember(hasExistingDefault) { mutableStateOf(!hasExistingDefault) }
     var pendingBluetoothAction by remember { mutableStateOf<BluetoothAction?>(null) }
     
@@ -417,6 +435,16 @@ fun AddPrinterDialog(
                     selectedPaperWidthMm = paperWidthMm,
                     onSelect = { selectedPaperWidth ->
                         paperWidthMm = selectedPaperWidth
+                        printAreaDots = defaultPrintAreaDotsForPaperWidthMm(selectedPaperWidth)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                PrintAreaDotsEditor(
+                    currentPrintAreaDots = printAreaDots,
+                    paperWidthMm = paperWidthMm,
+                    onChange = { updatedPrintAreaDots ->
+                        printAreaDots = updatedPrintAreaDots
                     }
                 )
 
@@ -457,7 +485,7 @@ fun AddPrinterDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(name, type, address, setAsDefault, paperWidthMm) },
+                onClick = { onConfirm(name, type, address, setAsDefault, paperWidthMm, printAreaDots) },
                 enabled = name.isNotBlank() && address.isNotBlank()
             ) {
                 Text("Add")
@@ -525,6 +553,71 @@ private fun ReceiptSizeSelector(
             modifier = Modifier.weight(1f)
         ) {
             Text("58 mm")
+        }
+    }
+}
+
+@Composable
+private fun PrintAreaDotsEditor(
+    currentPrintAreaDots: Int,
+    paperWidthMm: Int,
+    onChange: (Int) -> Unit
+) {
+    val defaultDots = defaultPrintAreaDotsForPaperWidthMm(paperWidthMm)
+    val presets = listOf(
+        defaultDots,
+        DEFAULT_PRINT_AREA_DOTS_58_MM,
+        DEFAULT_PRINT_AREA_DOTS_80_MM,
+        832,
+        960
+    ).distinct()
+
+    Column {
+        Text("Print Area (dots)", style = MaterialTheme.typography.labelMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+        StepperSetting(
+            title = "Fine Tune",
+            valueText = "${currentPrintAreaDots} dots",
+            supportingText = "Common starting points: 384 for many 58 mm printers and 576 for many 80 mm printers. This controls the printer's real printable width.",
+            canDecrease = currentPrintAreaDots > MIN_PRINT_AREA_DOTS,
+            canIncrease = currentPrintAreaDots < MAX_PRINT_AREA_DOTS,
+            onDecrease = {
+                onChange(sanitizePrintAreaDots(currentPrintAreaDots - PRINT_AREA_DOTS_STEP))
+            },
+            onIncrease = {
+                onChange(sanitizePrintAreaDots(currentPrintAreaDots + PRINT_AREA_DOTS_STEP))
+            }
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        presets.chunked(3).forEach { presetRow ->
+            Row(modifier = Modifier.fillMaxWidth()) {
+                presetRow.forEach { preset ->
+                    Button(
+                        onClick = { onChange(preset) },
+                        enabled = currentPrintAreaDots != preset,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("$preset")
+                    }
+                    if (preset != presetRow.last()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                }
+                repeat(3 - presetRow.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    if (it < 3 - presetRow.size - 1) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        TextButton(
+            onClick = { onChange(defaultDots) },
+            enabled = currentPrintAreaDots != defaultDots,
+            modifier = Modifier.align(Alignment.End)
+        ) {
+            Text("Reset to ${defaultDots} dots")
         }
     }
 }

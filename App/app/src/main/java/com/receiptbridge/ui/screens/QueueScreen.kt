@@ -27,6 +27,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.receiptbridge.data.JobStatus
 import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.PrinterProfile
+import com.receiptbridge.data.resolvedPrintAreaDots
 import com.receiptbridge.ui.viewmodel.JobsViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -115,9 +116,9 @@ private fun PrintJob.resolvePrinterLabel(
         profiles.firstOrNull { it.id == id }
     }
     return when {
-        matchedProfile != null -> "${matchedProfile.name} (${matchedProfile.paperWidthMm} mm)"
+        matchedProfile != null -> "${matchedProfile.name} (${matchedProfile.paperWidthMm} mm, ${matchedProfile.resolvedPrintAreaDots()} dots)"
         printerProfileId != null -> "Saved printer unavailable"
-        defaultProfile != null -> "${defaultProfile.name} (${defaultProfile.paperWidthMm} mm, default)"
+        defaultProfile != null -> "${defaultProfile.name} (${defaultProfile.paperWidthMm} mm, ${defaultProfile.resolvedPrintAreaDots()} dots, default)"
         else -> "Default printer not set"
     }
 }

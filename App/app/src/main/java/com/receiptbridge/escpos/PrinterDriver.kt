@@ -16,7 +16,7 @@ import com.google.gson.Gson
 import com.receiptbridge.data.ConnectionType
 import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.PrinterProfile
-import com.receiptbridge.data.defaultImageWidthForPaperWidthMm
+import com.receiptbridge.data.resolvedPrintAreaDots
 import com.receiptbridge.data.sanitizeSystemPrintContentFillPercent
 import com.receiptbridge.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -65,7 +65,7 @@ class PrinterDriver @Inject constructor(
                     if (header.startsWith("base64:")) {
                          val rasterImage = EscPosImageEncoder.decodeBase64Image(
                              base64Data = header,
-                             targetWidth = defaultImageWidthForPaperWidthMm(profile.paperWidthMm)
+                             targetWidth = profile.resolvedPrintAreaDots()
                          )
                          if (rasterImage != null) {
                              builder.align("center").image(
@@ -305,7 +305,7 @@ class PrinterDriver @Inject constructor(
 
             val lines = listOf(
                 "Printer: ${profile.name}",
-                "Paper: ${profile.paperWidthMm} mm",
+                "Paper: ${profile.paperWidthMm} mm / ${profile.resolvedPrintAreaDots()} dots",
                 "Path: Android print-service raster",
                 "This test should grow/shrink with the width setting."
             )
@@ -413,7 +413,7 @@ class PrinterDriver @Inject constructor(
         profile: PrinterProfile,
         contentFillPercent: Int
     ): List<EscPosRasterImage> {
-        val targetWidth = defaultImageWidthForPaperWidthMm(profile.paperWidthMm)
+        val targetWidth = profile.resolvedPrintAreaDots()
         val sanitizedFillPercent = sanitizeSystemPrintContentFillPercent(contentFillPercent)
         val targetContentWidth = ((targetWidth * (sanitizedFillPercent / 100f)).roundToInt())
             .coerceIn(1, targetWidth)
@@ -711,7 +711,7 @@ class PrinterDriver @Inject constructor(
             }
             "image" -> {
                 val base64Data = block.value as? String ?: return
-                val width = block.left?.toIntOrNull() ?: defaultImageWidthForPaperWidthMm(profile.paperWidthMm)
+                val width = block.left?.toIntOrNull() ?: profile.resolvedPrintAreaDots()
                 val height = block.right?.toIntOrNull()
                 val rasterImage = EscPosImageEncoder.decodeBase64Image(base64Data, width, height)
 

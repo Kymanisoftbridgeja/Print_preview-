@@ -35,6 +35,7 @@ import com.receiptbridge.data.MAX_KEEP_HISTORY_DAYS
 import com.receiptbridge.data.MAX_SYSTEM_PRINT_CONTENT_FILL_PERCENT
 import com.receiptbridge.data.MIN_KEEP_HISTORY_DAYS
 import com.receiptbridge.data.MIN_SYSTEM_PRINT_CONTENT_FILL_PERCENT
+import com.receiptbridge.data.resolvedPrintAreaDots
 import com.receiptbridge.data.sanitizeKeepHistoryDays
 import com.receiptbridge.data.sanitizeSystemPrintContentFillPercent
 import com.receiptbridge.ui.viewmodel.SettingsViewModel
@@ -176,11 +177,11 @@ fun SettingsScreen(
                     )
                 } else {
                     Text(
-                        text = "Uses: ${defaultProfile.name} (${defaultProfile.paperWidthMm} mm)",
+                        text = "Uses: ${defaultProfile.name} (${defaultProfile.paperWidthMm} mm / ${defaultProfile.resolvedPrintAreaDots()} dots)",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        text = "This test prints through the Android print-service raster path, so it reflects the width control above.",
+                        text = "This test prints through the Android print-service raster path, so it reflects the width control above. Edit printer dots in Manage Printers if the hardware width differs.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Spacer(modifier = Modifier.height(12.dp))

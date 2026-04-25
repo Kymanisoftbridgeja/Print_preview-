@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.receiptbridge.server.WebServer
+import com.receiptbridge.data.resolvedPrintAreaDots
 import com.receiptbridge.ui.viewmodel.PrinterViewModel
 
 @Composable
@@ -72,6 +73,7 @@ fun HomeScreen(
                     Text(defaultProfile.name, style = MaterialTheme.typography.titleMedium)
                     Text("${defaultProfile.connectionType} - ${defaultProfile.address}")
                     Text("Receipt width: ${defaultProfile.paperWidthMm} mm")
+                    Text("Print area: ${defaultProfile.resolvedPrintAreaDots()} dots")
                     Text("Saved printers: ${profiles.size}")
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(

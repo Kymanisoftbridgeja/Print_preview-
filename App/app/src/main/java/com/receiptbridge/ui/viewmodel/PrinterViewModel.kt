@@ -27,8 +27,11 @@ import com.receiptbridge.data.ConnectionType
 import com.receiptbridge.data.PAPER_WIDTH_58_MM
 import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.PrinterProfile
-import com.receiptbridge.data.defaultCharactersPerLineForPaperWidthMm
+import com.receiptbridge.data.defaultCharactersPerLineForPrintAreaDots
+import com.receiptbridge.data.defaultPrintAreaDotsForPaperWidthMm
 import com.receiptbridge.data.normalizePaperWidthMm
+import com.receiptbridge.data.resolvedPrintAreaDots
+import com.receiptbridge.data.sanitizePrintAreaDots
 import com.receiptbridge.data.repository.JobRepository
 import com.receiptbridge.data.repository.PrinterRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -497,24 +500,27 @@ class PrinterViewModel @Inject constructor(
         type: ConnectionType,
         address: String,
         isDefault: Boolean,
-        paperWidthMm: Int
+        paperWidthMm: Int,
+        printAreaDots: Int
     ) {
         viewModelScope.launch {
             val hadDefaultBeforeSave = repository.getDefaultProfile() != null
             val normalizedPaperWidth = normalizePaperWidthMm(paperWidthMm)
+            val sanitizedPrintAreaDots = sanitizePrintAreaDots(printAreaDots)
             val profile = PrinterProfile(
                 name = name,
                 connectionType = type,
                 address = address,
                 paperWidthMm = normalizedPaperWidth,
-                charactersPerLine = defaultCharactersPerLineForPaperWidthMm(normalizedPaperWidth),
+                printAreaDots = sanitizedPrintAreaDots,
+                charactersPerLine = defaultCharactersPerLineForPrintAreaDots(sanitizedPrintAreaDots),
                 isDefault = isDefault
             )
             repository.saveProfile(profile)
             _printerActionMessage.value = if (isDefault || !hadDefaultBeforeSave) {
-                "Printer saved and ready: $name is now the active printer (${normalizedPaperWidth} mm)."
+                "Printer saved and ready: $name is now the active printer (${normalizedPaperWidth} mm, ${sanitizedPrintAreaDots} dots)."
             } else {
-                "Printer saved: $name (${normalizedPaperWidth} mm)"
+                "Printer saved: $name (${normalizedPaperWidth} mm, ${sanitizedPrintAreaDots} dots)"
             }
         }
     }
@@ -540,14 +546,41 @@ class PrinterViewModel @Inject constructor(
                 return@launch
             }
 
+            val currentDefaultDots = defaultPrintAreaDotsForPaperWidthMm(profile.paperWidthMm)
+            val newDefaultDots = defaultPrintAreaDotsForPaperWidthMm(normalizedPaperWidth)
+            val nextPrintAreaDots = if (profile.resolvedPrintAreaDots() == currentDefaultDots) {
+                newDefaultDots
+            } else {
+                profile.resolvedPrintAreaDots()
+            }
+
             repository.saveProfile(
                 profile.copy(
                     paperWidthMm = normalizedPaperWidth,
-                    charactersPerLine = defaultCharactersPerLineForPaperWidthMm(normalizedPaperWidth)
+                    printAreaDots = nextPrintAreaDots,
+                    charactersPerLine = defaultCharactersPerLineForPrintAreaDots(nextPrintAreaDots)
                 )
             )
             _printerActionMessage.value =
-                "Receipt size for ${profile.name} set to ${normalizedPaperWidth} mm."
+                "Receipt size for ${profile.name} set to ${normalizedPaperWidth} mm (${nextPrintAreaDots} dots)."
+        }
+    }
+
+    fun updatePrintAreaDots(profile: PrinterProfile, printAreaDots: Int) {
+        viewModelScope.launch {
+            val sanitizedPrintAreaDots = sanitizePrintAreaDots(printAreaDots)
+            if (profile.resolvedPrintAreaDots() == sanitizedPrintAreaDots) {
+                return@launch
+            }
+
+            repository.saveProfile(
+                profile.copy(
+                    printAreaDots = sanitizedPrintAreaDots,
+                    charactersPerLine = defaultCharactersPerLineForPrintAreaDots(sanitizedPrintAreaDots)
+                )
+            )
+            _printerActionMessage.value =
+                "Print area for ${profile.name} set to ${sanitizedPrintAreaDots} dots."
         }
     }
 
@@ -581,15 +614,16 @@ class PrinterViewModel @Inject constructor(
     private fun buildTestPrintPayload(profile: PrinterProfile): String {
         val root = JsonObject().apply {
             addProperty("printer_profile_id", profile.id)
-                addProperty("copies", 1)
-                add("content", JsonObject().apply {
-                    addProperty("type", "escpos_blocks")
-                    add("blocks", JsonArray().apply {
-                        addCommand("align", "center")
+            addProperty("copies", 1)
+            add("content", JsonObject().apply {
+                addProperty("type", "escpos_blocks")
+                add("blocks", JsonArray().apply {
+                    addCommand("align", "center")
                     addCommand("text", "ReceiptBridge Connection Test")
                     addCommand("text", profile.name)
                     addCommand("align", "left")
                     addCommand("text", "Paper: ${profile.paperWidthMm} mm")
+                    addCommand("text", "Print area: ${profile.resolvedPrintAreaDots()} dots")
                     addCommand("text", "Connection: ${profile.connectionType}")
                     addCommand("text", "Address: ${profile.address}")
                     addCommand("text", "If this prints, the saved printer profile is working.")

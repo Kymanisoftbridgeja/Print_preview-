@@ -9,6 +9,7 @@ import android.printservice.PrinterDiscoverySession
 import dagger.hilt.android.EntryPointAccessors
 import com.receiptbridge.data.PAPER_WIDTH_58_MM
 import com.receiptbridge.data.PrinterProfile
+import com.receiptbridge.data.resolvedPrintAreaDots
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -95,6 +96,9 @@ class ReceiptBridgePrinterDiscoverySession(
             append(" - ")
             append(profile.paperWidthMm)
             append(" mm")
+            append(" - ")
+            append(profile.resolvedPrintAreaDots())
+            append(" dots")
             append(" - ")
             append(profile.address)
         }
