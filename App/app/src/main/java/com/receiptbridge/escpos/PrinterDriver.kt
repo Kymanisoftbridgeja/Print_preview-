@@ -258,7 +258,8 @@ class PrinterDriver @Inject constructor(
                     options = EscPosEncodingOptions(
                         grayscaleThreshold = SYSTEM_PRINT_GRAYSCALE_THRESHOLD,
                         bolden = true,
-                        scaleWithFilter = false
+                        scaleWithFilter = true,
+                        allowUpscale = true
                     )
                 )
             } finally {

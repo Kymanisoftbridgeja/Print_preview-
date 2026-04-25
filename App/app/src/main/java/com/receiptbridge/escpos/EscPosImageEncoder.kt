@@ -13,7 +13,8 @@ data class EscPosRasterImage(
 data class EscPosEncodingOptions(
     val grayscaleThreshold: Float = 180f,
     val bolden: Boolean = false,
-    val scaleWithFilter: Boolean = true
+    val scaleWithFilter: Boolean = true,
+    val allowUpscale: Boolean = false
 )
 
 object EscPosImageEncoder {
@@ -23,7 +24,12 @@ object EscPosImageEncoder {
         targetHeight: Int? = null,
         options: EscPosEncodingOptions = EscPosEncodingOptions()
     ): EscPosRasterImage {
-        val scaledBitmap = bitmap.scaleForEscPos(targetWidth, targetHeight, options.scaleWithFilter)
+        val scaledBitmap = bitmap.scaleForEscPos(
+            targetWidth = targetWidth,
+            targetHeight = targetHeight,
+            scaleWithFilter = options.scaleWithFilter,
+            allowUpscale = options.allowUpscale
+        )
         return try {
             scaledBitmap.toRasterImage(options)
         } finally {
@@ -66,10 +72,13 @@ object EscPosImageEncoder {
     private fun Bitmap.scaleForEscPos(
         targetWidth: Int,
         targetHeight: Int?,
-        scaleWithFilter: Boolean
+        scaleWithFilter: Boolean,
+        allowUpscale: Boolean
     ): Bitmap {
         val safeTargetWidth = targetWidth.coerceAtLeast(1)
         val desiredWidth = if (targetHeight != null) {
+            safeTargetWidth
+        } else if (allowUpscale) {
             safeTargetWidth
         } else {
             width.coerceAtMost(safeTargetWidth)
