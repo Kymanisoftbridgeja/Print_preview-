@@ -189,10 +189,74 @@ class PrinterDriver @Inject constructor(
                 postScale(scale, scale)
             }
             page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-            EscPosImageEncoder.encodeBitmap(bitmap, targetWidth, targetHeight)
+            val trimmedBitmap = trimVerticalWhitespace(bitmap)
+            try {
+                EscPosImageEncoder.encodeBitmap(trimmedBitmap, targetWidth)
+            } finally {
+                if (trimmedBitmap !== bitmap) {
+                    trimmedBitmap.recycle()
+                }
+            }
         } finally {
             bitmap.recycle()
         }
+    }
+
+    private fun trimVerticalWhitespace(bitmap: Bitmap): Bitmap {
+        val rowBuffer = IntArray(bitmap.width)
+        var top = -1
+        var bottom = -1
+
+        for (y in 0 until bitmap.height) {
+            bitmap.getPixels(rowBuffer, 0, bitmap.width, 0, y, bitmap.width, 1)
+            if (rowContainsContent(rowBuffer)) {
+                top = y
+                break
+            }
+        }
+
+        if (top == -1) {
+            return bitmap
+        }
+
+        for (y in bitmap.height - 1 downTo top) {
+            bitmap.getPixels(rowBuffer, 0, bitmap.width, 0, y, bitmap.width, 1)
+            if (rowContainsContent(rowBuffer)) {
+                bottom = y
+                break
+            }
+        }
+
+        if (bottom == -1) {
+            return bitmap
+        }
+
+        val cropTop = (top - RECEIPT_VERTICAL_TRIM_PADDING_PX).coerceAtLeast(0)
+        val cropBottom = (bottom + RECEIPT_VERTICAL_TRIM_PADDING_PX).coerceAtMost(bitmap.height - 1)
+        val croppedHeight = cropBottom - cropTop + 1
+        if (cropTop == 0 && croppedHeight == bitmap.height) {
+            return bitmap
+        }
+
+        return Bitmap.createBitmap(bitmap, 0, cropTop, bitmap.width, croppedHeight)
+    }
+
+    private fun rowContainsContent(rowPixels: IntArray): Boolean {
+        for (pixel in rowPixels) {
+            val alpha = (pixel ushr 24) and 0xFF
+            if (alpha <= RECEIPT_MIN_ALPHA_THRESHOLD) {
+                continue
+            }
+
+            val red = (pixel shr 16) and 0xFF
+            val green = (pixel shr 8) and 0xFF
+            val blue = pixel and 0xFF
+            val grayscale = (red * 0.299f) + (green * 0.587f) + (blue * 0.114f)
+            if (grayscale < RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun processBlock(builder: EscPosBuilder, block: PrintBlock, profile: PrinterProfile) {
@@ -293,5 +357,11 @@ class PrinterDriver @Inject constructor(
                 builder.raw(bytes)
             }
         }
+    }
+
+    private companion object {
+        const val RECEIPT_VERTICAL_TRIM_PADDING_PX = 8
+        const val RECEIPT_MIN_ALPHA_THRESHOLD = 16
+        const val RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD = 245f
     }
 }
