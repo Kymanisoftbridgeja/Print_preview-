@@ -228,7 +228,7 @@ class PrinterDriver @Inject constructor(
                 postScale(scale, scale)
             }
             page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-            val trimmedBitmap = trimContentBounds(bitmap, renderSettings)
+            val trimmedBitmap = trimContentBounds(bitmap)
             try {
                 buildRasterBands(trimmedBitmap, targetWidth, renderSettings)
             } finally {
@@ -258,7 +258,7 @@ class PrinterDriver @Inject constructor(
             val bandHeight = minOf(renderBandHeight, bitmap.height - top)
             val bandBitmap = Bitmap.createBitmap(bitmap, 0, top, bitmap.width, bandHeight)
             try {
-                val trimmedBandBitmap = trimContentBounds(bandBitmap, renderSettings)
+                val trimmedBandBitmap = trimContentBounds(bandBitmap)
                 try {
                     val rasterBand = EscPosImageEncoder.encodeBitmap(
                         bitmap = trimmedBandBitmap,
@@ -316,10 +316,7 @@ class PrinterDriver @Inject constructor(
         )
     }
 
-    private fun trimContentBounds(
-        bitmap: Bitmap,
-        renderSettings: SystemPrintRenderSettings
-    ): Bitmap {
+    private fun trimContentBounds(bitmap: Bitmap): Bitmap {
         val rowBuffer = IntArray(bitmap.width)
         val rowDarkCounts = IntArray(bitmap.height)
         val columnDarkCounts = IntArray(bitmap.width)
@@ -338,20 +335,19 @@ class PrinterDriver @Inject constructor(
 
         val maxRowDarkCount = rowDarkCounts.maxOrNull() ?: 0
         val maxColumnDarkCount = columnDarkCounts.maxOrNull() ?: 0
-        val widthFillFactor = renderSettings.widthFillPercent / 100f
 
         val minDarkPixelsPerRow = max(
             4,
             max(
                 bitmap.width / CONTENT_ROW_DARK_PIXEL_DIVISOR,
-                (maxRowDarkCount * (BASE_ROW_ACTIVITY_RATIO * widthFillFactor)).toInt()
+                (maxRowDarkCount * BASE_ROW_ACTIVITY_RATIO).toInt()
             )
         )
         val minDarkPixelsPerColumn = max(
             4,
             max(
                 bitmap.height / CONTENT_COLUMN_DARK_PIXEL_DIVISOR,
-                (maxColumnDarkCount * (BASE_COLUMN_ACTIVITY_RATIO * widthFillFactor)).toInt()
+                (maxColumnDarkCount * BASE_COLUMN_ACTIVITY_RATIO).toInt()
             )
         )
 

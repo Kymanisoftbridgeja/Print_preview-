@@ -89,21 +89,6 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         TextField(
-            value = systemPrintRenderSettings.widthFillPercent.toString(),
-            onValueChange = { input ->
-                if (input.all(Char::isDigit) && input.isNotBlank()) {
-                    viewModel.updateSystemPrintWidthFillPercent(input.toInt())
-                }
-            },
-            label = { Text("Content Width Fill (%)") },
-            supportingText = { Text("Raises how aggressively Android print content expands toward the full receipt width.") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        TextField(
             value = systemPrintRenderSettings.darknessPercent.toString(),
             onValueChange = { input ->
                 if (input.all(Char::isDigit) && input.isNotBlank()) {

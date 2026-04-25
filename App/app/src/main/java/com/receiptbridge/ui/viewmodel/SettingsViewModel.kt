@@ -34,10 +34,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun updateSystemPrintWidthFillPercent(value: Int) {
-        systemPrintRenderSettingsRepository.updateWidthFillPercent(value)
-    }
-
     fun updateSystemPrintDarknessPercent(value: Int) {
         systemPrintRenderSettingsRepository.updateDarknessPercent(value)
     }
