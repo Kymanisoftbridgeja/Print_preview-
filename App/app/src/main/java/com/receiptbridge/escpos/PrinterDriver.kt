@@ -1,6 +1,7 @@
 package com.receiptbridge.escpos
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
@@ -12,7 +13,10 @@ import android.content.Context
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import com.google.zxing.BarcodeFormat
 import com.google.gson.Gson
+import com.google.zxing.qrcode.QRCodeWriter
+import com.receiptbridge.data.AppSettings
 import com.receiptbridge.data.ConnectionType
 import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.PrinterProfile
@@ -27,6 +31,7 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.roundToInt
 import javax.inject.Inject
@@ -53,12 +58,24 @@ class PrinterDriver @Inject constructor(
             
             try {
                 connection.connect()
-                
-                val builder = EscPosBuilder().reset()
-                
+
                 // Refresh settings
                 settingsRepository.refreshSettings()
                 val settings = settingsRepository.settings.value
+
+                val rasterizedPrintData = buildRasterizedReceiptPrintData(
+                    payload = payload,
+                    profile = profile,
+                    settings = settings
+                )
+                if (rasterizedPrintData != null) {
+                    repeat(resolveCopies(job, payload)) {
+                        connection.write(rasterizedPrintData)
+                    }
+                    return@withContext
+                }
+
+                val builder = EscPosBuilder().reset()
                 
                 // Apply Global Header
                 settings.globalHeader?.let { header ->
@@ -101,11 +118,7 @@ class PrinterDriver @Inject constructor(
                 val printData = builder.build()
                 
                 // Honor copies
-                val copies = when {
-                    job.copies > 0 -> job.copies
-                    payload.copies > 0 -> payload.copies
-                    else -> 1
-                }
+                val copies = resolveCopies(job, payload)
                 repeat(copies) {
                     connection.write(printData)
                 }
@@ -114,6 +127,602 @@ class PrinterDriver @Inject constructor(
                 connection.disconnect()
             }
         }
+    }
+
+    private fun resolveCopies(job: PrintJob, payload: PrintPayload): Int {
+        return when {
+            job.copies > 0 -> job.copies
+            payload.copies > 0 -> payload.copies
+            else -> 1
+        }
+    }
+
+    private fun buildRasterizedReceiptPrintData(
+        payload: PrintPayload,
+        profile: PrinterProfile,
+        settings: AppSettings
+    ): ByteArray? {
+        if (!payload.content.type.equals("escpos_blocks", ignoreCase = true)) {
+            return null
+        }
+
+        val blocks = payload.content.blocks
+        if (blocks.isEmpty() || blocks.any { it.cmd.equals("raw", ignoreCase = true) }) {
+            return null
+        }
+
+        val receiptBitmap = renderReceiptBitmap(blocks, profile, settings) ?: return null
+        return try {
+            val rasterImage = EscPosImageEncoder.encodeBitmap(
+                bitmap = receiptBitmap,
+                targetWidth = profile.resolvedPrintAreaDots(),
+                options = EscPosEncodingOptions(
+                    grayscaleThreshold = DIRECT_RECEIPT_GRAYSCALE_THRESHOLD,
+                    bolden = false,
+                    scaleWithFilter = false,
+                    allowUpscale = false
+                )
+            )
+
+            val builder = EscPosBuilder()
+                .reset()
+                .align("center")
+
+            if (blocks.any { it.cmd.equals("drawer", ignoreCase = true) }) {
+                builder.drawerOpen()
+            }
+
+            splitRasterBands(rasterImage, DIRECT_RECEIPT_RASTER_BAND_HEIGHT_PX).forEach { band ->
+                builder.imageColumnFormat(
+                    band.width,
+                    band.height,
+                    band.rasterBytes
+                )
+            }
+
+            repeat(blocks.count { it.cmd.equals("beep", ignoreCase = true) }.coerceAtMost(3)) {
+                builder.beep()
+            }
+
+            val shouldCut = profile.autoCut || blocks.any { it.cmd.equals("cut", ignoreCase = true) }
+            if (shouldCut) {
+                builder.feed(profile.feedLines)
+                builder.cut()
+            } else {
+                builder.feed(profile.feedLines)
+            }
+
+            builder.build()
+        } finally {
+            receiptBitmap.recycle()
+        }
+    }
+
+    private fun renderReceiptBitmap(
+        blocks: List<PrintBlock>,
+        profile: PrinterProfile,
+        settings: AppSettings
+    ): Bitmap? {
+        val targetWidth = profile.resolvedPrintAreaDots()
+        val paints = createRasterReceiptPaints(targetWidth)
+        val sidePadding = (targetWidth * DIRECT_RECEIPT_SIDE_PADDING_RATIO)
+            .roundToInt()
+            .coerceIn(DIRECT_RECEIPT_MIN_SIDE_PADDING_PX, max(DIRECT_RECEIPT_MIN_SIDE_PADDING_PX, targetWidth / 5))
+        val contentWidth = (targetWidth - (sidePadding * 2))
+            .coerceAtLeast((targetWidth * DIRECT_RECEIPT_MIN_CONTENT_RATIO).roundToInt())
+
+        val elements = mutableListOf<RasterReceiptElement>()
+        appendConfiguredHeaderOrFooter(
+            destination = elements,
+            configuredValue = settings.globalHeader,
+            paints = paints,
+            contentWidth = contentWidth,
+            style = ReceiptTextStyle.TITLE
+        )
+
+        var currentAlign = ReceiptAlign.LEFT
+        for (block in blocks) {
+            when (block.cmd.lowercase(Locale.US)) {
+                "align" -> {
+                    currentAlign = parseReceiptAlign(block.value?.toString())
+                }
+                "text" -> {
+                    appendTextElement(
+                        destination = elements,
+                        text = block.value?.toString().orEmpty(),
+                        align = currentAlign,
+                        paint = paints.bodyPaint,
+                        style = ReceiptTextStyle.BODY,
+                        maxWidth = contentWidth
+                    )
+                }
+                "row2" -> {
+                    val rightText = block.right.orEmpty()
+                    val rightWidth = ceil(paints.amountPaint.measureText(rightText).toDouble()).toInt()
+                    val leftWidth = (contentWidth - rightWidth - paints.rowGap)
+                        .coerceAtLeast(contentWidth / 2)
+                    val leftLines = wrapReceiptText(
+                        text = block.left.orEmpty(),
+                        paint = paints.bodyPaint,
+                        maxWidth = leftWidth
+                    )
+                    elements += RasterReceiptElement.Row(
+                        leftLines = leftLines,
+                        right = rightText
+                    )
+                }
+                "feed" -> {
+                    val lines = (block.value as? Number)?.toInt()?.coerceAtLeast(1) ?: 1
+                    elements += RasterReceiptElement.Spacer(lines * paints.bodyLineHeight)
+                }
+                "image" -> {
+                    createBitmapElement(
+                        base64Data = block.value?.toString().orEmpty(),
+                        requestedWidth = block.left?.toIntOrNull(),
+                        requestedHeight = block.right?.toIntOrNull(),
+                        maxWidth = contentWidth,
+                        align = currentAlign
+                    )?.let(elements::add)
+                }
+                "qr" -> {
+                    createQrElement(
+                        value = block.value?.toString().orEmpty(),
+                        sizeHint = block.left?.toIntOrNull(),
+                        targetWidth = targetWidth,
+                        maxWidth = contentWidth,
+                        align = currentAlign
+                    )?.let(elements::add)
+                }
+                "cut", "drawer", "beep", "charset", "codepage" -> {
+                    // These are handled outside raster layout or are not needed for raster text rendering.
+                }
+                else -> {
+                    recycleElementBitmaps(elements)
+                    return null
+                }
+            }
+        }
+
+        appendConfiguredHeaderOrFooter(
+            destination = elements,
+            configuredValue = settings.globalFooter,
+            paints = paints,
+            contentWidth = contentWidth,
+            style = ReceiptTextStyle.FOOTER
+        )
+
+        if (elements.none { it !is RasterReceiptElement.Spacer }) {
+            recycleElementBitmaps(elements)
+            return null
+        }
+
+        val totalHeight = (
+            paints.topPadding +
+                elements.sumOf { measureElementHeight(it, paints) } +
+                paints.bottomPadding
+            ).coerceAtLeast(targetWidth / 2)
+
+        val bitmap = Bitmap.createBitmap(targetWidth, totalHeight, Bitmap.Config.ARGB_8888)
+        try {
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+
+            var y = paints.topPadding.toFloat()
+            elements.forEach { element ->
+                y = drawElement(
+                    canvas = canvas,
+                    element = element,
+                    paints = paints,
+                    pageWidth = targetWidth,
+                    sidePadding = sidePadding,
+                    y = y
+                )
+            }
+            return bitmap
+        } finally {
+            recycleElementBitmaps(elements)
+        }
+    }
+
+    private fun createRasterReceiptPaints(targetWidth: Int): RasterReceiptPaints {
+        val scale = targetWidth / BASE_RECEIPT_RENDER_WIDTH.toFloat()
+
+        fun receiptPaint(
+            textSize: Float,
+            bold: Boolean,
+            align: Paint.Align = Paint.Align.LEFT
+        ): Paint {
+            return Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                this.textSize = (textSize * scale).coerceAtLeast(16f)
+                typeface = Typeface.create(Typeface.SANS_SERIF, if (bold) Typeface.BOLD else Typeface.NORMAL)
+                textAlign = align
+                isLinearText = true
+                isSubpixelText = false
+                isDither = true
+                isFakeBoldText = bold
+            }
+        }
+
+        val titlePaint = receiptPaint(textSize = 34f, bold = true)
+        val bodyPaint = receiptPaint(textSize = 25f, bold = false).apply {
+            isFakeBoldText = true
+        }
+        val amountPaint = receiptPaint(textSize = 27f, bold = true)
+        val footerPaint = receiptPaint(textSize = 22f, bold = true)
+
+        return RasterReceiptPaints(
+            titlePaint = titlePaint,
+            bodyPaint = bodyPaint,
+            amountPaint = amountPaint,
+            footerPaint = footerPaint,
+            titleLineHeight = calculateLineHeight(titlePaint, 1.12f),
+            bodyLineHeight = calculateLineHeight(bodyPaint, 1.16f),
+            footerLineHeight = calculateLineHeight(footerPaint, 1.14f),
+            blockSpacing = (14f * scale).roundToInt().coerceAtLeast(10),
+            rowGap = (22f * scale).roundToInt().coerceAtLeast(14),
+            topPadding = (18f * scale).roundToInt().coerceAtLeast(12),
+            bottomPadding = (22f * scale).roundToInt().coerceAtLeast(14)
+        )
+    }
+
+    private fun appendConfiguredHeaderOrFooter(
+        destination: MutableList<RasterReceiptElement>,
+        configuredValue: String?,
+        paints: RasterReceiptPaints,
+        contentWidth: Int,
+        style: ReceiptTextStyle
+    ) {
+        if (configuredValue.isNullOrBlank()) {
+            return
+        }
+
+        createBitmapElement(
+            base64Data = configuredValue,
+            requestedWidth = contentWidth,
+            requestedHeight = null,
+            maxWidth = contentWidth,
+            align = ReceiptAlign.CENTER
+        )?.let {
+            destination += it
+            return
+        }
+
+        appendTextElement(
+            destination = destination,
+            text = configuredValue,
+            align = ReceiptAlign.CENTER,
+            paint = when (style) {
+                ReceiptTextStyle.TITLE -> paints.titlePaint
+                ReceiptTextStyle.FOOTER -> paints.footerPaint
+                ReceiptTextStyle.BODY -> paints.bodyPaint
+            },
+            style = style,
+            maxWidth = contentWidth
+        )
+    }
+
+    private fun appendTextElement(
+        destination: MutableList<RasterReceiptElement>,
+        text: String,
+        align: ReceiptAlign,
+        paint: Paint,
+        style: ReceiptTextStyle,
+        maxWidth: Int
+    ) {
+        val sanitizedText = text.replace("\r\n", "\n").replace('\r', '\n')
+        val wrappedLines = sanitizedText
+            .split('\n')
+            .flatMap { paragraph -> wrapReceiptText(paragraph, paint, maxWidth) }
+
+        if (wrappedLines.isEmpty()) {
+            destination += RasterReceiptElement.Spacer(calculateLineHeight(paint, 1.0f))
+            return
+        }
+
+        destination += RasterReceiptElement.Text(
+            lines = wrappedLines,
+            align = align,
+            style = style
+        )
+    }
+
+    private fun wrapReceiptText(
+        text: String,
+        paint: Paint,
+        maxWidth: Int
+    ): List<String> {
+        if (text.isBlank()) {
+            return listOf("")
+        }
+
+        val lines = mutableListOf<String>()
+        var currentLine = ""
+        text.trim().split(WHITESPACE_REGEX).forEach { word ->
+            if (word.isBlank()) {
+                return@forEach
+            }
+
+            if (currentLine.isEmpty()) {
+                if (paint.measureText(word) <= maxWidth) {
+                    currentLine = word
+                } else {
+                    val splitWordParts = splitLongWord(word, paint, maxWidth)
+                    if (splitWordParts.isNotEmpty()) {
+                        lines += splitWordParts.dropLast(1)
+                        currentLine = splitWordParts.last()
+                    }
+                }
+                return@forEach
+            }
+
+            val candidate = "$currentLine $word"
+            if (paint.measureText(candidate) <= maxWidth) {
+                currentLine = candidate
+            } else {
+                lines += currentLine
+                if (paint.measureText(word) <= maxWidth) {
+                    currentLine = word
+                } else {
+                    val splitWordParts = splitLongWord(word, paint, maxWidth)
+                    if (splitWordParts.isNotEmpty()) {
+                        lines += splitWordParts.dropLast(1)
+                        currentLine = splitWordParts.last()
+                    } else {
+                        currentLine = word
+                    }
+                }
+            }
+        }
+
+        if (currentLine.isNotEmpty()) {
+            lines += currentLine
+        }
+
+        return lines.ifEmpty { listOf("") }
+    }
+
+    private fun splitLongWord(
+        word: String,
+        paint: Paint,
+        maxWidth: Int
+    ): List<String> {
+        if (word.isEmpty()) {
+            return emptyList()
+        }
+
+        val parts = mutableListOf<String>()
+        var chunk = StringBuilder()
+        word.forEach { character ->
+            val candidate = buildString {
+                append(chunk)
+                append(character)
+            }
+            if (chunk.isNotEmpty() && paint.measureText(candidate) > maxWidth) {
+                parts += chunk.toString()
+                chunk = StringBuilder().append(character)
+            } else {
+                chunk.append(character)
+            }
+        }
+
+        if (chunk.isNotEmpty()) {
+            parts += chunk.toString()
+        }
+
+        return parts
+    }
+
+    private fun createBitmapElement(
+        base64Data: String,
+        requestedWidth: Int?,
+        requestedHeight: Int?,
+        maxWidth: Int,
+        align: ReceiptAlign
+    ): RasterReceiptElement.Image? {
+        val bitmap = decodeBitmapFromBase64(base64Data) ?: return null
+        val scaledBitmap = scaleBitmapForReceipt(
+            bitmap = bitmap,
+            targetWidth = (requestedWidth ?: maxWidth).coerceAtMost(maxWidth).coerceAtLeast(1),
+            targetHeight = requestedHeight
+        )
+        return RasterReceiptElement.Image(
+            bitmap = scaledBitmap,
+            align = align
+        )
+    }
+
+    private fun decodeBitmapFromBase64(base64Data: String): Bitmap? {
+        val normalized = base64Data
+            .substringAfter("base64,", missingDelimiterValue = base64Data)
+            .removePrefix("base64:")
+            .trim()
+        val decoded = try {
+            android.util.Base64.decode(normalized, android.util.Base64.DEFAULT)
+        } catch (_: IllegalArgumentException) {
+            return null
+        }
+        return BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+    }
+
+    private fun scaleBitmapForReceipt(
+        bitmap: Bitmap,
+        targetWidth: Int,
+        targetHeight: Int?
+    ): Bitmap {
+        val safeTargetWidth = targetWidth.coerceAtLeast(1)
+        val safeTargetHeight = targetHeight?.coerceAtLeast(1)
+            ?: ((bitmap.height * (safeTargetWidth.toFloat() / bitmap.width.toFloat())).roundToInt()).coerceAtLeast(1)
+
+        if (bitmap.width == safeTargetWidth && bitmap.height == safeTargetHeight) {
+            return bitmap
+        }
+
+        val scaledBitmap = Bitmap.createScaledBitmap(bitmap, safeTargetWidth, safeTargetHeight, true)
+        if (scaledBitmap !== bitmap) {
+            bitmap.recycle()
+        }
+        return scaledBitmap
+    }
+
+    private fun createQrElement(
+        value: String,
+        sizeHint: Int?,
+        targetWidth: Int,
+        maxWidth: Int,
+        align: ReceiptAlign
+    ): RasterReceiptElement.Image? {
+        if (value.isBlank()) {
+            return null
+        }
+
+        val scale = targetWidth / BASE_RECEIPT_RENDER_WIDTH.toFloat()
+        val requestedSize = sizeHint
+            ?.let { (it * 28f * scale).roundToInt() }
+            ?: (targetWidth * DIRECT_RECEIPT_DEFAULT_QR_RATIO).roundToInt()
+        val qrSize = requestedSize.coerceIn(
+            (targetWidth * DIRECT_RECEIPT_MIN_QR_RATIO).roundToInt().coerceAtLeast(96),
+            maxWidth
+        )
+
+        return try {
+            val matrix = QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, qrSize, qrSize)
+            val pixels = IntArray(qrSize * qrSize)
+            for (y in 0 until qrSize) {
+                for (x in 0 until qrSize) {
+                    pixels[(y * qrSize) + x] = if (matrix[x, y]) Color.BLACK else Color.WHITE
+                }
+            }
+            val bitmap = Bitmap.createBitmap(qrSize, qrSize, Bitmap.Config.ARGB_8888).apply {
+                setPixels(pixels, 0, qrSize, 0, 0, qrSize, qrSize)
+            }
+            RasterReceiptElement.Image(bitmap = bitmap, align = align)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseReceiptAlign(rawAlign: String?): ReceiptAlign {
+        return when (rawAlign?.lowercase(Locale.US)) {
+            "center" -> ReceiptAlign.CENTER
+            "right" -> ReceiptAlign.RIGHT
+            else -> ReceiptAlign.LEFT
+        }
+    }
+
+    private fun measureElementHeight(
+        element: RasterReceiptElement,
+        paints: RasterReceiptPaints
+    ): Int {
+        return when (element) {
+            is RasterReceiptElement.Image -> element.bitmap.height + paints.blockSpacing
+            is RasterReceiptElement.Row -> {
+                val rowLines = max(1, element.leftLines.size)
+                (rowLines * paints.bodyLineHeight) + paints.blockSpacing
+            }
+            is RasterReceiptElement.Spacer -> element.height
+            is RasterReceiptElement.Text -> {
+                val lineHeight = when (element.style) {
+                    ReceiptTextStyle.TITLE -> paints.titleLineHeight
+                    ReceiptTextStyle.BODY -> paints.bodyLineHeight
+                    ReceiptTextStyle.FOOTER -> paints.footerLineHeight
+                }
+                (element.lines.size * lineHeight) + paints.blockSpacing
+            }
+        }
+    }
+
+    private fun drawElement(
+        canvas: Canvas,
+        element: RasterReceiptElement,
+        paints: RasterReceiptPaints,
+        pageWidth: Int,
+        sidePadding: Int,
+        y: Float
+    ): Float {
+        var currentY = y
+        return when (element) {
+            is RasterReceiptElement.Image -> {
+                val x = when (element.align) {
+                    ReceiptAlign.LEFT -> sidePadding.toFloat()
+                    ReceiptAlign.CENTER -> ((pageWidth - element.bitmap.width) / 2f)
+                    ReceiptAlign.RIGHT -> (pageWidth - sidePadding - element.bitmap.width).toFloat()
+                }
+                canvas.drawBitmap(element.bitmap, x, currentY, null)
+                currentY + element.bitmap.height + paints.blockSpacing
+            }
+            is RasterReceiptElement.Row -> {
+                val leftX = sidePadding.toFloat()
+                val rightX = (pageWidth - sidePadding).toFloat()
+                val bodyPaint = paints.bodyPaint
+                val amountPaint = paints.amountPaint
+
+                if (element.leftLines.isEmpty()) {
+                    val baseline = currentY - amountPaint.fontMetrics.ascent
+                    amountPaint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(element.right, rightX, baseline, amountPaint)
+                    currentY += paints.bodyLineHeight
+                } else {
+                    element.leftLines.forEachIndexed { index, line ->
+                        val baseline = currentY - bodyPaint.fontMetrics.ascent
+                        bodyPaint.textAlign = Paint.Align.LEFT
+                        canvas.drawText(line, leftX, baseline, bodyPaint)
+                        if (index == 0 && element.right.isNotBlank()) {
+                            amountPaint.textAlign = Paint.Align.RIGHT
+                            canvas.drawText(element.right, rightX, baseline, amountPaint)
+                        }
+                        currentY += paints.bodyLineHeight
+                    }
+                }
+                currentY + paints.blockSpacing
+            }
+            is RasterReceiptElement.Spacer -> currentY + element.height
+            is RasterReceiptElement.Text -> {
+                val paint = when (element.style) {
+                    ReceiptTextStyle.TITLE -> paints.titlePaint
+                    ReceiptTextStyle.BODY -> paints.bodyPaint
+                    ReceiptTextStyle.FOOTER -> paints.footerPaint
+                }
+                val lineHeight = when (element.style) {
+                    ReceiptTextStyle.TITLE -> paints.titleLineHeight
+                    ReceiptTextStyle.BODY -> paints.bodyLineHeight
+                    ReceiptTextStyle.FOOTER -> paints.footerLineHeight
+                }
+                val x = when (element.align) {
+                    ReceiptAlign.LEFT -> sidePadding.toFloat()
+                    ReceiptAlign.CENTER -> pageWidth / 2f
+                    ReceiptAlign.RIGHT -> (pageWidth - sidePadding).toFloat()
+                }
+                paint.textAlign = when (element.align) {
+                    ReceiptAlign.LEFT -> Paint.Align.LEFT
+                    ReceiptAlign.CENTER -> Paint.Align.CENTER
+                    ReceiptAlign.RIGHT -> Paint.Align.RIGHT
+                }
+                element.lines.forEach { line ->
+                    val baseline = currentY - paint.fontMetrics.ascent
+                    canvas.drawText(line, x, baseline, paint)
+                    currentY += lineHeight
+                }
+                currentY + paints.blockSpacing
+            }
+        }
+    }
+
+    private fun recycleElementBitmaps(elements: List<RasterReceiptElement>) {
+        elements.forEach { element ->
+            if (element is RasterReceiptElement.Image && !element.bitmap.isRecycled) {
+                element.bitmap.recycle()
+            }
+        }
+    }
+
+    private fun calculateLineHeight(
+        paint: Paint,
+        multiplier: Float
+    ): Int {
+        val metrics = paint.fontMetrics
+        val rawHeight = metrics.descent - metrics.ascent
+        return (rawHeight * multiplier).roundToInt().coerceAtLeast(1)
     }
 
     suspend fun printPdfDocument(
@@ -431,18 +1040,18 @@ class PrinterDriver @Inject constructor(
             val croppedBitmap = cropToContentBounds(bitmap, contentBounds)
             try {
                 val rasterPage = EscPosImageEncoder.encodeBitmap(
-                    bitmap = croppedBitmap,
-                    targetWidth = targetContentWidth,
-                    options = EscPosEncodingOptions(
-                        grayscaleThreshold = SYSTEM_PRINT_FIXED_GRAYSCALE_THRESHOLD,
-                        bolden = true,
-                        scaleWithFilter = true,
-                        allowUpscale = false
-                    )
+                bitmap = croppedBitmap,
+                targetWidth = targetContentWidth,
+                options = EscPosEncodingOptions(
+                    grayscaleThreshold = SYSTEM_PRINT_FIXED_GRAYSCALE_THRESHOLD,
+                    bolden = true,
+                    scaleWithFilter = true,
+                    allowUpscale = true
                 )
-                splitRasterBands(
-                    centerRasterImage(rasterPage, targetWidth),
-                    SYSTEM_PRINT_RASTER_BAND_HEIGHT_PX
+            )
+            splitRasterBands(
+                centerRasterImage(rasterPage, targetWidth),
+                SYSTEM_PRINT_RASTER_BAND_HEIGHT_PX
                 )
             } finally {
                 if (croppedBitmap !== bitmap) {
@@ -755,6 +1364,15 @@ class PrinterDriver @Inject constructor(
     }
 
     private companion object {
+        val WHITESPACE_REGEX = "\\s+".toRegex()
+        const val BASE_RECEIPT_RENDER_WIDTH = 576
+        const val DIRECT_RECEIPT_SIDE_PADDING_RATIO = 0.055f
+        const val DIRECT_RECEIPT_MIN_CONTENT_RATIO = 0.72f
+        const val DIRECT_RECEIPT_MIN_SIDE_PADDING_PX = 12
+        const val DIRECT_RECEIPT_DEFAULT_QR_RATIO = 0.28f
+        const val DIRECT_RECEIPT_MIN_QR_RATIO = 0.18f
+        const val DIRECT_RECEIPT_GRAYSCALE_THRESHOLD = 212f
+        const val DIRECT_RECEIPT_RASTER_BAND_HEIGHT_PX = 240
         const val RECEIPT_VERTICAL_TRIM_PADDING_PX = 8
         const val RECEIPT_HORIZONTAL_TRIM_PADDING_PX = 20
         const val RECEIPT_MIN_ALPHA_THRESHOLD = 16
@@ -779,5 +1397,49 @@ class PrinterDriver @Inject constructor(
 
         val height: Int
             get() = bottom - top + 1
+    }
+
+    private data class RasterReceiptPaints(
+        val titlePaint: Paint,
+        val bodyPaint: Paint,
+        val amountPaint: Paint,
+        val footerPaint: Paint,
+        val titleLineHeight: Int,
+        val bodyLineHeight: Int,
+        val footerLineHeight: Int,
+        val blockSpacing: Int,
+        val rowGap: Int,
+        val topPadding: Int,
+        val bottomPadding: Int
+    )
+
+    private sealed class RasterReceiptElement {
+        data class Text(
+            val lines: List<String>,
+            val align: ReceiptAlign,
+            val style: ReceiptTextStyle
+        ) : RasterReceiptElement()
+
+        data class Row(
+            val leftLines: List<String>,
+            val right: String
+        ) : RasterReceiptElement()
+
+        data class Image(
+            val bitmap: Bitmap,
+            val align: ReceiptAlign
+        ) : RasterReceiptElement()
+
+        data class Spacer(
+            val height: Int
+        ) : RasterReceiptElement()
+    }
+
+    private enum class ReceiptAlign {
+        LEFT, CENTER, RIGHT
+    }
+
+    private enum class ReceiptTextStyle {
+        TITLE, BODY, FOOTER
     }
 }
