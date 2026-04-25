@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.max
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -127,22 +128,21 @@ class PrinterDriver @Inject constructor(
                                 connection.write(EscPosBuilder().reset().build())
                                 for (pageIndex in 0 until renderer.pageCount) {
                                     renderer.openPage(pageIndex).use { page ->
-                                        val rasterImage = renderPdfPage(page, profile)
-                                        val pageData = EscPosBuilder()
-                                            .align("center")
-                                            .image(
-                                                rasterImage.width,
-                                                rasterImage.height,
-                                                rasterImage.rasterBytes
-                                            )
-                                            .newLine()
-                                            .apply {
-                                                if (pageIndex < renderer.pageCount - 1) {
-                                                    feed(1)
-                                                }
-                                            }
-                                            .build()
-                                        connection.write(pageData)
+                                        renderPdfPageStrips(page, profile).forEach { rasterImage ->
+                                            val pageData = EscPosBuilder()
+                                                .align("center")
+                                                .image(
+                                                    rasterImage.width,
+                                                    rasterImage.height,
+                                                    rasterImage.rasterBytes
+                                                )
+                                                .newLine()
+                                                .build()
+                                            connection.write(pageData)
+                                        }
+                                        if (pageIndex < renderer.pageCount - 1) {
+                                            connection.write(EscPosBuilder().feed(1).build())
+                                        }
                                     }
                                 }
 
@@ -208,10 +208,10 @@ class PrinterDriver @Inject constructor(
         }
     }
 
-    private fun renderPdfPage(
+    private fun renderPdfPageStrips(
         page: PdfRenderer.Page,
         profile: PrinterProfile
-    ): EscPosRasterImage {
+    ): List<EscPosRasterImage> {
         val targetWidth = defaultImageWidthForPaperWidthMm(profile.paperWidthMm)
         val renderWidth = targetWidth * SYSTEM_PRINT_RENDER_SCALE_FACTOR
         val scale = renderWidth.toFloat() / page.width.toFloat()
@@ -225,15 +225,7 @@ class PrinterDriver @Inject constructor(
             page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
             val trimmedBitmap = trimContentBounds(bitmap)
             try {
-                EscPosImageEncoder.encodeBitmap(
-                    bitmap = trimmedBitmap,
-                    targetWidth = targetWidth,
-                    options = EscPosEncodingOptions(
-                        grayscaleThreshold = SYSTEM_PRINT_GRAYSCALE_THRESHOLD,
-                        bolden = true,
-                        scaleWithFilter = true
-                    )
-                )
+                buildRasterBands(trimmedBitmap, targetWidth)
             } finally {
                 if (trimmedBitmap !== bitmap) {
                     trimmedBitmap.recycle()
@@ -244,33 +236,66 @@ class PrinterDriver @Inject constructor(
         }
     }
 
+    private fun buildRasterBands(
+        bitmap: Bitmap,
+        targetWidth: Int
+    ): List<EscPosRasterImage> {
+        val scaledHeight = ((bitmap.height * (targetWidth.toFloat() / bitmap.width.toFloat()))
+            .toInt()
+            .coerceAtLeast(1))
+        val bandCount = max(1, (scaledHeight + SYSTEM_PRINT_BAND_HEIGHT_PX - 1) / SYSTEM_PRINT_BAND_HEIGHT_PX)
+        val renderBandHeight = max(1, bitmap.height / bandCount)
+        val bands = mutableListOf<EscPosRasterImage>()
+
+        var top = 0
+        while (top < bitmap.height) {
+            val bandHeight = minOf(renderBandHeight, bitmap.height - top)
+            val bandBitmap = Bitmap.createBitmap(bitmap, 0, top, bitmap.width, bandHeight)
+            try {
+                bands += EscPosImageEncoder.encodeBitmap(
+                    bitmap = bandBitmap,
+                    targetWidth = targetWidth,
+                    options = EscPosEncodingOptions(
+                        grayscaleThreshold = SYSTEM_PRINT_GRAYSCALE_THRESHOLD,
+                        bolden = true,
+                        scaleWithFilter = false
+                    )
+                )
+            } finally {
+                bandBitmap.recycle()
+            }
+            top += bandHeight
+        }
+
+        return bands
+    }
+
     private fun trimContentBounds(bitmap: Bitmap): Bitmap {
         val rowBuffer = IntArray(bitmap.width)
-        var top = bitmap.height
-        var bottom = -1
-        var left = bitmap.width
-        var right = -1
+        val rowDarkCounts = IntArray(bitmap.height)
+        val columnDarkCounts = IntArray(bitmap.width)
 
         for (y in 0 until bitmap.height) {
             bitmap.getPixels(rowBuffer, 0, bitmap.width, 0, y, bitmap.width, 1)
-            val contentRange = findContentRange(rowBuffer)
-            if (contentRange != null) {
-                if (y < top) {
-                    top = y
-                }
-                if (y > bottom) {
-                    bottom = y
-                }
-                if (contentRange.first < left) {
-                    left = contentRange.first
-                }
-                if (contentRange.last > right) {
-                    right = contentRange.last
+            var rowDarkCount = 0
+            for (x in rowBuffer.indices) {
+                if (isDarkContentPixel(rowBuffer[x])) {
+                    rowDarkCount++
+                    columnDarkCounts[x]++
                 }
             }
+            rowDarkCounts[y] = rowDarkCount
         }
 
-        if (bottom == -1 || right == -1) {
+        val minDarkPixelsPerRow = max(4, bitmap.width / CONTENT_ROW_DARK_PIXEL_DIVISOR)
+        val minDarkPixelsPerColumn = max(4, bitmap.height / CONTENT_COLUMN_DARK_PIXEL_DIVISOR)
+
+        val top = rowDarkCounts.indexOfFirst { it >= minDarkPixelsPerRow }
+        val bottom = rowDarkCounts.indexOfLast { it >= minDarkPixelsPerRow }
+        val left = columnDarkCounts.indexOfFirst { it >= minDarkPixelsPerColumn }
+        val right = columnDarkCounts.indexOfLast { it >= minDarkPixelsPerColumn }
+
+        if (top == -1 || bottom == -1 || left == -1 || right == -1) {
             return bitmap
         }
 
@@ -287,28 +312,17 @@ class PrinterDriver @Inject constructor(
         return Bitmap.createBitmap(bitmap, cropLeft, cropTop, croppedWidth, croppedHeight)
     }
 
-    private fun findContentRange(rowPixels: IntArray): IntRange? {
-        var firstContentIndex = -1
-        var lastContentIndex = -1
-        for (index in rowPixels.indices) {
-            val pixel = rowPixels[index]
-            val alpha = (pixel ushr 24) and 0xFF
-            if (alpha <= RECEIPT_MIN_ALPHA_THRESHOLD) {
-                continue
-            }
-
-            val red = (pixel shr 16) and 0xFF
-            val green = (pixel shr 8) and 0xFF
-            val blue = pixel and 0xFF
-            val grayscale = (red * 0.299f) + (green * 0.587f) + (blue * 0.114f)
-            if (grayscale < RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD) {
-                if (firstContentIndex == -1) {
-                    firstContentIndex = index
-                }
-                lastContentIndex = index
-            }
+    private fun isDarkContentPixel(pixel: Int): Boolean {
+        val alpha = (pixel ushr 24) and 0xFF
+        if (alpha <= RECEIPT_MIN_ALPHA_THRESHOLD) {
+            return false
         }
-        return if (firstContentIndex == -1) null else firstContentIndex..lastContentIndex
+
+        val red = (pixel shr 16) and 0xFF
+        val green = (pixel shr 8) and 0xFF
+        val blue = pixel and 0xFF
+        val grayscale = (red * 0.299f) + (green * 0.587f) + (blue * 0.114f)
+        return grayscale < RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD
     }
 
     private fun processBlock(builder: EscPosBuilder, block: PrintBlock, profile: PrinterProfile) {
@@ -415,8 +429,11 @@ class PrinterDriver @Inject constructor(
         const val RECEIPT_VERTICAL_TRIM_PADDING_PX = 8
         const val RECEIPT_HORIZONTAL_TRIM_PADDING_PX = 12
         const val RECEIPT_MIN_ALPHA_THRESHOLD = 16
-        const val RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD = 245f
-        const val SYSTEM_PRINT_RENDER_SCALE_FACTOR = 3
-        const val SYSTEM_PRINT_GRAYSCALE_THRESHOLD = 220f
+        const val RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD = 210f
+        const val SYSTEM_PRINT_RENDER_SCALE_FACTOR = 4
+        const val SYSTEM_PRINT_GRAYSCALE_THRESHOLD = 232f
+        const val SYSTEM_PRINT_BAND_HEIGHT_PX = 256
+        const val CONTENT_ROW_DARK_PIXEL_DIVISOR = 250
+        const val CONTENT_COLUMN_DARK_PIXEL_DIVISOR = 300
     }
 }
