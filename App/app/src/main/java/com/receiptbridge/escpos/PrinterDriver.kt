@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.max
+import kotlin.math.roundToInt
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -223,9 +224,17 @@ class PrinterDriver @Inject constructor(
                 postScale(scale, scale)
             }
             page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-            val trimmedBitmap = trimContentBounds(bitmap)
+            val contentBounds = detectContentBounds(bitmap)
+            val trimmedBitmap = contentBounds?.let { bounds ->
+                Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width, bounds.height)
+            } ?: bitmap
+            val targetContentWidth = contentBounds?.let { bounds ->
+                ((bounds.width.toFloat() / bitmap.width.toFloat()) * targetWidth)
+                    .roundToInt()
+                    .coerceIn(1, targetWidth)
+            } ?: targetWidth
             try {
-                buildRasterBands(trimmedBitmap, targetWidth)
+                buildRasterBands(trimmedBitmap, targetWidth, targetContentWidth)
             } finally {
                 if (trimmedBitmap !== bitmap) {
                     trimmedBitmap.recycle()
@@ -238,9 +247,11 @@ class PrinterDriver @Inject constructor(
 
     private fun buildRasterBands(
         bitmap: Bitmap,
-        targetWidth: Int
+        targetWidth: Int,
+        targetContentWidth: Int
     ): List<EscPosRasterImage> {
-        val scaledHeight = ((bitmap.height * (targetWidth.toFloat() / bitmap.width.toFloat()))
+        val safeTargetContentWidth = targetContentWidth.coerceIn(1, targetWidth)
+        val scaledHeight = ((bitmap.height * (safeTargetContentWidth.toFloat() / bitmap.width.toFloat()))
             .toInt()
             .coerceAtLeast(1))
         val bandCount = max(1, (scaledHeight + SYSTEM_PRINT_BAND_HEIGHT_PX - 1) / SYSTEM_PRINT_BAND_HEIGHT_PX)
@@ -251,12 +262,12 @@ class PrinterDriver @Inject constructor(
         while (top < bitmap.height) {
             val bandHeight = minOf(renderBandHeight, bitmap.height - top)
             val bandBitmap = Bitmap.createBitmap(bitmap, 0, top, bitmap.width, bandHeight)
+            val trimmedBandBitmap = trimVerticalWhitespace(bandBitmap)
             try {
-                val trimmedBandBitmap = trimContentBounds(bandBitmap)
-                try {
+                if (trimmedBandBitmap != null) {
                     val rasterBand = EscPosImageEncoder.encodeBitmap(
                         bitmap = trimmedBandBitmap,
-                        targetWidth = targetWidth,
+                        targetWidth = safeTargetContentWidth,
                         options = EscPosEncodingOptions(
                             grayscaleThreshold = SYSTEM_PRINT_FIXED_GRAYSCALE_THRESHOLD,
                             bolden = true,
@@ -265,12 +276,11 @@ class PrinterDriver @Inject constructor(
                         )
                     )
                     bands += centerRasterImage(rasterBand, targetWidth)
-                } finally {
-                    if (trimmedBandBitmap !== bandBitmap) {
-                        trimmedBandBitmap.recycle()
-                    }
                 }
             } finally {
+                if (trimmedBandBitmap != null && trimmedBandBitmap !== bandBitmap) {
+                    trimmedBandBitmap.recycle()
+                }
                 bandBitmap.recycle()
             }
             top += bandHeight
@@ -310,7 +320,7 @@ class PrinterDriver @Inject constructor(
         )
     }
 
-    private fun trimContentBounds(bitmap: Bitmap): Bitmap {
+    private fun detectContentBounds(bitmap: Bitmap): ContentBounds? {
         val rowBuffer = IntArray(bitmap.width)
         val rowDarkCounts = IntArray(bitmap.height)
         val columnDarkCounts = IntArray(bitmap.width)
@@ -351,20 +361,29 @@ class PrinterDriver @Inject constructor(
         val right = columnDarkCounts.indexOfLast { it >= minDarkPixelsPerColumn }
 
         if (top == -1 || bottom == -1 || left == -1 || right == -1) {
-            return bitmap
+            return null
         }
 
         val cropTop = (top - RECEIPT_VERTICAL_TRIM_PADDING_PX).coerceAtLeast(0)
         val cropBottom = (bottom + RECEIPT_VERTICAL_TRIM_PADDING_PX).coerceAtMost(bitmap.height - 1)
         val cropLeft = (left - RECEIPT_HORIZONTAL_TRIM_PADDING_PX).coerceAtLeast(0)
         val cropRight = (right + RECEIPT_HORIZONTAL_TRIM_PADDING_PX).coerceAtMost(bitmap.width - 1)
-        val croppedHeight = cropBottom - cropTop + 1
-        val croppedWidth = cropRight - cropLeft + 1
-        if (cropTop == 0 && cropLeft == 0 && croppedHeight == bitmap.height && croppedWidth == bitmap.width) {
+
+        return ContentBounds(
+            left = cropLeft,
+            top = cropTop,
+            right = cropRight,
+            bottom = cropBottom
+        )
+    }
+
+    private fun trimVerticalWhitespace(bitmap: Bitmap): Bitmap? {
+        val contentBounds = detectContentBounds(bitmap) ?: return null
+        if (contentBounds.top == 0 && contentBounds.bottom == bitmap.height - 1) {
             return bitmap
         }
 
-        return Bitmap.createBitmap(bitmap, cropLeft, cropTop, croppedWidth, croppedHeight)
+        return Bitmap.createBitmap(bitmap, 0, contentBounds.top, bitmap.width, contentBounds.height)
     }
 
     private fun isDarkContentPixel(pixel: Int): Boolean {
@@ -533,5 +552,18 @@ class PrinterDriver @Inject constructor(
         const val CONTENT_COLUMN_DARK_PIXEL_DIVISOR = 300
         const val BASE_ROW_ACTIVITY_RATIO = 0.12f
         const val BASE_COLUMN_ACTIVITY_RATIO = 0.12f
+    }
+
+    private data class ContentBounds(
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int
+    ) {
+        val width: Int
+            get() = right - left + 1
+
+        val height: Int
+            get() = bottom - top + 1
     }
 }
