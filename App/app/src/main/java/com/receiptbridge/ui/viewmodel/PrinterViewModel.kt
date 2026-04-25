@@ -21,8 +21,12 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import com.receiptbridge.data.ConnectionType
+import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.PrinterProfile
+import com.receiptbridge.data.repository.JobRepository
 import com.receiptbridge.data.repository.PrinterRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -47,6 +51,7 @@ import javax.inject.Inject
 @HiltViewModel
 class PrinterViewModel @Inject constructor(
     private val repository: PrinterRepository,
+    private val jobRepository: JobRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -71,6 +76,9 @@ class PrinterViewModel @Inject constructor(
 
     private val _foundIpDevices = MutableStateFlow<List<String>>(emptyList())
     val foundIpDevices: StateFlow<List<String>> = _foundIpDevices.asStateFlow()
+
+    private val _printerActionMessage = MutableStateFlow<String?>(null)
+    val printerActionMessage: StateFlow<String?> = _printerActionMessage.asStateFlow()
 
     fun getUsbDevices(): List<UsbDevice> {
         return usbManager.deviceList.values.toList()
@@ -483,6 +491,7 @@ class PrinterViewModel @Inject constructor(
 
     fun addProfile(name: String, type: ConnectionType, address: String, isDefault: Boolean) {
         viewModelScope.launch {
+            val hadDefaultBeforeSave = repository.getDefaultProfile() != null
             val profile = PrinterProfile(
                 name = name,
                 connectionType = type,
@@ -490,19 +499,41 @@ class PrinterViewModel @Inject constructor(
                 isDefault = isDefault
             )
             repository.saveProfile(profile)
+            _printerActionMessage.value = if (isDefault || !hadDefaultBeforeSave) {
+                "Printer saved and ready: $name is now the active printer."
+            } else {
+                "Printer saved: $name"
+            }
         }
     }
 
     fun deleteProfile(profile: PrinterProfile) {
         viewModelScope.launch {
             repository.deleteProfile(profile)
+            _printerActionMessage.value = "Printer removed: ${profile.name}"
         }
     }
     
     fun setDefault(profile: PrinterProfile) {
         viewModelScope.launch {
              repository.saveProfile(profile.copy(isDefault = true))
+             _printerActionMessage.value = "Default printer set to ${profile.name}"
         }
+    }
+
+    fun queueTestPrint(profile: PrinterProfile) {
+        viewModelScope.launch {
+            val testJob = PrintJob(
+                printerProfileId = profile.id,
+                payloadJson = buildTestPrintPayload(profile)
+            )
+            jobRepository.createJob(testJob)
+            _printerActionMessage.value = "Test print queued for ${profile.name}. Check Print Queue for status."
+        }
+    }
+
+    fun clearPrinterActionMessage() {
+        _printerActionMessage.value = null
     }
 
     override fun onCleared() {
@@ -515,6 +546,34 @@ class PrinterViewModel @Inject constructor(
         val prefixLength: Int,
         val localAddress: Long
     )
+
+    private fun buildTestPrintPayload(profile: PrinterProfile): String {
+        val root = JsonObject().apply {
+            addProperty("printer_profile_id", profile.id)
+            addProperty("copies", 1)
+            add("content", JsonObject().apply {
+                addProperty("type", "escpos_blocks")
+                add("blocks", JsonArray().apply {
+                    addCommand("align", "center")
+                    addCommand("text", "ReceiptBridge Test Print")
+                    addCommand("text", profile.name)
+                    addCommand("align", "left")
+                    addCommand("text", "Connection: ${profile.connectionType}")
+                    addCommand("text", "Address: ${profile.address}")
+                    addCommand("text", "If this prints, the saved printer profile is working.")
+                    addCommand("text", "Queued from the app test action.")
+                })
+            })
+        }
+        return root.toString()
+    }
+
+    private fun JsonArray.addCommand(command: String, value: String) {
+        add(JsonObject().apply {
+            addProperty("cmd", command)
+            addProperty("value", value)
+        })
+    }
 
     private companion object {
         const val BLUETOOTH_SCAN_TIMEOUT_MS = 20_000L

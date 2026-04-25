@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.receiptbridge.data.JobStatus
+import com.receiptbridge.data.PrintJob
+import com.receiptbridge.data.PrinterProfile
 import com.receiptbridge.ui.viewmodel.JobsViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -36,7 +38,9 @@ fun QueueScreen(
     viewModel: JobsViewModel = hiltViewModel()
 ) {
     val jobs by viewModel.allJobs.collectAsState(initial = emptyList())
+    val profiles by viewModel.profiles.collectAsState(initial = emptyList())
     var selectedTab by remember { mutableStateOf(0) }
+    val defaultProfile = profiles.firstOrNull { it.isDefault } ?: profiles.firstOrNull()
 
     val activeJobs = jobs.filter { it.status == JobStatus.PENDING || it.status == JobStatus.PRINTING }
     val historyJobs = jobs.filter { it.status == JobStatus.COMPLETED || it.status == JobStatus.FAILED }
@@ -78,6 +82,7 @@ fun QueueScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Job ID: ${job.id.take(8)}", style = MaterialTheme.typography.titleMedium)
+                            Text("Printer: ${job.resolvePrinterName(profiles, defaultProfile)}")
                             Text("Status: ${job.status}")
                             Text(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(job.timestamp)))
                             if (job.status == JobStatus.FAILED) {
@@ -99,5 +104,20 @@ fun QueueScreen(
                 }
             }
         }
+    }
+}
+
+private fun PrintJob.resolvePrinterName(
+    profiles: List<PrinterProfile>,
+    defaultProfile: PrinterProfile?
+): String {
+    val matchedProfile = printerProfileId?.let { id ->
+        profiles.firstOrNull { it.id == id }
+    }
+    return when {
+        matchedProfile != null -> matchedProfile.name
+        printerProfileId != null -> "Saved printer unavailable"
+        defaultProfile != null -> "${defaultProfile.name} (default)"
+        else -> "Default printer not set"
     }
 }

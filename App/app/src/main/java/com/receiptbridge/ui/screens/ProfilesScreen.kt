@@ -62,6 +62,7 @@ fun ProfilesScreen(
     viewModel: PrinterViewModel = hiltViewModel()
 ) {
     val profiles by viewModel.profiles.collectAsState(initial = emptyList())
+    val printerActionMessage by viewModel.printerActionMessage.collectAsState()
     var showDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -78,6 +79,16 @@ fun ProfilesScreen(
                 .padding(16.dp)
         ) {
             Text("Printer Profiles", style = MaterialTheme.typography.titleLarge)
+            printerActionMessage?.let { message ->
+                Spacer(modifier = Modifier.height(12.dp))
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = message,
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
             
             LazyColumn {
                 items(profiles) { profile ->
@@ -100,6 +111,14 @@ fun ProfilesScreen(
                                 IconButton(onClick = { viewModel.deleteProfile(profile) }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Delete")
                                 }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = { viewModel.queueTestPrint(profile) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Test Print")
                             }
 
                             if (!profile.isDefault) {
