@@ -131,7 +131,7 @@ class PrinterDriver @Inject constructor(
                                         renderPdfPageStrips(page, profile).forEach { rasterImage ->
                                             val pageData = EscPosBuilder()
                                                 .align("center")
-                                                .image(
+                                                .imageColumnFormat(
                                                     rasterImage.width,
                                                     rasterImage.height,
                                                     rasterImage.rasterBytes

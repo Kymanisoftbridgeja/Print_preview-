@@ -137,6 +137,44 @@ class EscPosBuilder {
         return this
     }
 
+    fun imageColumnFormat(width: Int, height: Int, data: ByteArray): EscPosBuilder {
+        val safeWidth = width.coerceAtLeast(1)
+        val safeHeight = height.coerceAtLeast(1)
+        val widthBytes = (safeWidth + 7) / 8
+
+        // ESC 3 n: set line spacing to 24 dots for 24-dot double-density bit image rows.
+        buffer.write(byteArrayOf(ESC, '3'.code.toByte(), 24))
+
+        var yOffset = 0
+        while (yOffset < safeHeight) {
+            val nL = (safeWidth and 0xFF).toByte()
+            val nH = ((safeWidth shr 8) and 0xFF).toByte()
+
+            // ESC * 33 nL nH : 24-dot double-density bit image.
+            buffer.write(byteArrayOf(ESC, '*'.code.toByte(), 33, nL, nH))
+
+            for (x in 0 until safeWidth) {
+                for (slice in 0 until 3) {
+                    var sliceByte = 0
+                    for (bit in 0 until 8) {
+                        val y = yOffset + (slice * 8) + bit
+                        if (isRasterPixelBlack(data, widthBytes, x, y, safeHeight)) {
+                            sliceByte = sliceByte or (0x80 shr bit)
+                        }
+                    }
+                    buffer.write(sliceByte)
+                }
+            }
+
+            buffer.write(LF.toInt())
+            yOffset += 24
+        }
+
+        // ESC 2: restore default line spacing.
+        buffer.write(byteArrayOf(ESC, '2'.code.toByte()))
+        return this
+    }
+
     fun drawerOpen(): EscPosBuilder {
         // ESC p m t1 t2
         buffer.write(byteArrayOf(ESC, 'p'.code.toByte(), 0, 25, 250.toByte()))
@@ -156,5 +194,25 @@ class EscPosBuilder {
 
     fun build(): ByteArray {
         return buffer.toByteArray()
+    }
+
+    private fun isRasterPixelBlack(
+        data: ByteArray,
+        widthBytes: Int,
+        x: Int,
+        y: Int,
+        height: Int
+    ): Boolean {
+        if (x < 0 || y < 0 || y >= height) {
+            return false
+        }
+
+        val byteIndex = y * widthBytes + (x / 8)
+        if (byteIndex !in data.indices) {
+            return false
+        }
+
+        val mask = 0x80 shr (x % 8)
+        return (data[byteIndex].toInt() and mask) != 0
     }
 }
