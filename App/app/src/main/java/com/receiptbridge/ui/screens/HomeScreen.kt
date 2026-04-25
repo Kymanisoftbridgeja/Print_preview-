@@ -88,6 +88,11 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "To use these printers from Android's print dialog, enable ReceiptBridge Print Service in your device's print settings.",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
 

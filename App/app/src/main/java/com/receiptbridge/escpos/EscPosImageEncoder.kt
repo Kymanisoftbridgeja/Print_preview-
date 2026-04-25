@@ -11,6 +11,21 @@ data class EscPosRasterImage(
 )
 
 object EscPosImageEncoder {
+    fun encodeBitmap(
+        bitmap: Bitmap,
+        targetWidth: Int,
+        targetHeight: Int? = null
+    ): EscPosRasterImage {
+        val scaledBitmap = bitmap.scaleForEscPos(targetWidth, targetHeight)
+        return try {
+            scaledBitmap.toRasterImage()
+        } finally {
+            if (scaledBitmap !== bitmap) {
+                scaledBitmap.recycle()
+            }
+        }
+    }
+
     fun decodeBase64Image(
         base64Data: String,
         targetWidth: Int,
@@ -34,15 +49,10 @@ object EscPosImageEncoder {
         targetHeight: Int? = null
     ): EscPosRasterImage? {
         val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size) ?: return null
-        val scaledBitmap = bitmap.scaleForEscPos(targetWidth, targetHeight)
-        if (scaledBitmap !== bitmap) {
-            bitmap.recycle()
-        }
-
         return try {
-            scaledBitmap.toRasterImage()
+            encodeBitmap(bitmap, targetWidth, targetHeight)
         } finally {
-            scaledBitmap.recycle()
+            bitmap.recycle()
         }
     }
 

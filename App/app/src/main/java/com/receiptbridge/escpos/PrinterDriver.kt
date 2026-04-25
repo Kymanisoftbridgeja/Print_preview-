@@ -1,8 +1,14 @@
 package com.receiptbridge.escpos
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
 import com.google.gson.Gson
 import com.receiptbridge.data.ConnectionType
 import com.receiptbridge.data.PrintJob
@@ -99,6 +105,56 @@ class PrinterDriver @Inject constructor(
         }
     }
 
+    suspend fun printPdfDocument(
+        documentData: ParcelFileDescriptor,
+        profile: PrinterProfile,
+        copies: Int = 1
+    ) {
+        withContext(Dispatchers.IO) {
+            documentData.use { parcelFileDescriptor ->
+                PdfRenderer(parcelFileDescriptor).use { renderer ->
+                    val connection = createConnection(profile)
+                    try {
+                        connection.connect()
+                        repeat(copies.coerceAtLeast(1)) {
+                            connection.write(EscPosBuilder().reset().build())
+                            for (pageIndex in 0 until renderer.pageCount) {
+                                renderer.openPage(pageIndex).use { page ->
+                                    val rasterImage = renderPdfPage(page, profile)
+                                    val pageData = EscPosBuilder()
+                                        .align("center")
+                                        .image(
+                                            rasterImage.width,
+                                            rasterImage.height,
+                                            rasterImage.rasterBytes
+                                        )
+                                        .newLine()
+                                        .apply {
+                                            if (pageIndex < renderer.pageCount - 1) {
+                                                feed(1)
+                                            }
+                                        }
+                                        .build()
+                                    connection.write(pageData)
+                                }
+                            }
+
+                            val finalizeBuilder = EscPosBuilder()
+                            if (profile.autoCut) {
+                                finalizeBuilder.feed(profile.feedLines).cut()
+                            } else {
+                                finalizeBuilder.feed(profile.feedLines)
+                            }
+                            connection.write(finalizeBuilder.build())
+                        }
+                    } finally {
+                        connection.disconnect()
+                    }
+                }
+            }
+        }
+    }
+
     private fun createConnection(profile: PrinterProfile): PrinterConnection {
         return when (profile.connectionType) {
             ConnectionType.NETWORK -> {
@@ -116,6 +172,26 @@ class PrinterDriver @Inject constructor(
             ConnectionType.USB -> {
                 UsbConnection(context, profile.address)
             }
+        }
+    }
+
+    private fun renderPdfPage(
+        page: PdfRenderer.Page,
+        profile: PrinterProfile
+    ): EscPosRasterImage {
+        val targetWidth = defaultImageWidthForPaperWidthMm(profile.paperWidthMm)
+        val scale = targetWidth.toFloat() / page.width.toFloat()
+        val targetHeight = (page.height * scale).toInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        return try {
+            Canvas(bitmap).drawColor(Color.WHITE)
+            val matrix = Matrix().apply {
+                postScale(scale, scale)
+            }
+            page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+            EscPosImageEncoder.encodeBitmap(bitmap, targetWidth, targetHeight)
+        } finally {
+            bitmap.recycle()
         }
     }
 

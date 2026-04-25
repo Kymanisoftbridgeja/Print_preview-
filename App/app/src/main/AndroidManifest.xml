@@ -63,6 +63,20 @@
             android:name=".server.WebServer"
             android:foregroundServiceType="dataSync" 
             android:exported="false" />
+
+        <service
+            android:name=".systemprint.ReceiptBridgePrintService"
+            android:permission="android.permission.BIND_PRINT_SERVICE"
+            android:exported="true"
+            android:label="@string/print_service_name">
+            <intent-filter>
+                <action android:name="android.printservice.PrintService" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.printservice"
+                android:resource="@xml/receiptbridge_print_service" />
+        </service>
             
     </application>
 
