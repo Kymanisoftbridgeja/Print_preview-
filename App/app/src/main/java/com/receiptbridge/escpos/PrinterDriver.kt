@@ -15,6 +15,8 @@ import com.receiptbridge.data.PrintJob
 import com.receiptbridge.data.PrinterProfile
 import com.receiptbridge.data.defaultImageWidthForPaperWidthMm
 import com.receiptbridge.data.repository.SettingsRepository
+import com.receiptbridge.data.repository.SystemPrintRenderSettings
+import com.receiptbridge.data.repository.SystemPrintRenderSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,7 +29,8 @@ import javax.inject.Singleton
 @Singleton
 class PrinterDriver @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val systemPrintRenderSettingsRepository: SystemPrintRenderSettingsRepository
 ) {
     private val gson = Gson()
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -114,6 +117,7 @@ class PrinterDriver @Inject constructor(
         copies: Int = 1
     ) {
         withContext(Dispatchers.IO) {
+            val renderSettings = systemPrintRenderSettingsRepository.settings.value
             val seekablePdfFile = createSeekablePdfCopy(documentData)
             try {
                 ParcelFileDescriptor.open(
@@ -128,7 +132,7 @@ class PrinterDriver @Inject constructor(
                                 connection.write(EscPosBuilder().reset().build())
                                 for (pageIndex in 0 until renderer.pageCount) {
                                     renderer.openPage(pageIndex).use { page ->
-                                        renderPdfPageStrips(page, profile).forEach { rasterImage ->
+                                        renderPdfPageStrips(page, profile, renderSettings).forEach { rasterImage ->
                                             val pageData = EscPosBuilder()
                                                 .align("center")
                                                 .imageColumnFormat(
@@ -210,7 +214,8 @@ class PrinterDriver @Inject constructor(
 
     private fun renderPdfPageStrips(
         page: PdfRenderer.Page,
-        profile: PrinterProfile
+        profile: PrinterProfile,
+        renderSettings: SystemPrintRenderSettings
     ): List<EscPosRasterImage> {
         val targetWidth = defaultImageWidthForPaperWidthMm(profile.paperWidthMm)
         val renderWidth = targetWidth * SYSTEM_PRINT_RENDER_SCALE_FACTOR
@@ -223,9 +228,9 @@ class PrinterDriver @Inject constructor(
                 postScale(scale, scale)
             }
             page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-            val trimmedBitmap = trimContentBounds(bitmap)
+            val trimmedBitmap = trimContentBounds(bitmap, renderSettings)
             try {
-                buildRasterBands(trimmedBitmap, targetWidth)
+                buildRasterBands(trimmedBitmap, targetWidth, renderSettings)
             } finally {
                 if (trimmedBitmap !== bitmap) {
                     trimmedBitmap.recycle()
@@ -238,7 +243,8 @@ class PrinterDriver @Inject constructor(
 
     private fun buildRasterBands(
         bitmap: Bitmap,
-        targetWidth: Int
+        targetWidth: Int,
+        renderSettings: SystemPrintRenderSettings
     ): List<EscPosRasterImage> {
         val scaledHeight = ((bitmap.height * (targetWidth.toFloat() / bitmap.width.toFloat()))
             .toInt()
@@ -252,16 +258,23 @@ class PrinterDriver @Inject constructor(
             val bandHeight = minOf(renderBandHeight, bitmap.height - top)
             val bandBitmap = Bitmap.createBitmap(bitmap, 0, top, bitmap.width, bandHeight)
             try {
-                bands += EscPosImageEncoder.encodeBitmap(
-                    bitmap = bandBitmap,
-                    targetWidth = targetWidth,
-                    options = EscPosEncodingOptions(
-                        grayscaleThreshold = SYSTEM_PRINT_GRAYSCALE_THRESHOLD,
-                        bolden = true,
-                        scaleWithFilter = true,
-                        allowUpscale = true
+                val trimmedBandBitmap = trimContentBounds(bandBitmap, renderSettings)
+                try {
+                    bands += EscPosImageEncoder.encodeBitmap(
+                        bitmap = trimmedBandBitmap,
+                        targetWidth = targetWidth,
+                        options = EscPosEncodingOptions(
+                            grayscaleThreshold = renderSettings.toSystemPrintGrayscaleThreshold(),
+                            bolden = true,
+                            scaleWithFilter = true,
+                            allowUpscale = true
+                        )
                     )
-                )
+                } finally {
+                    if (trimmedBandBitmap !== bandBitmap) {
+                        trimmedBandBitmap.recycle()
+                    }
+                }
             } finally {
                 bandBitmap.recycle()
             }
@@ -271,7 +284,10 @@ class PrinterDriver @Inject constructor(
         return bands
     }
 
-    private fun trimContentBounds(bitmap: Bitmap): Bitmap {
+    private fun trimContentBounds(
+        bitmap: Bitmap,
+        renderSettings: SystemPrintRenderSettings
+    ): Bitmap {
         val rowBuffer = IntArray(bitmap.width)
         val rowDarkCounts = IntArray(bitmap.height)
         val columnDarkCounts = IntArray(bitmap.width)
@@ -288,8 +304,24 @@ class PrinterDriver @Inject constructor(
             rowDarkCounts[y] = rowDarkCount
         }
 
-        val minDarkPixelsPerRow = max(4, bitmap.width / CONTENT_ROW_DARK_PIXEL_DIVISOR)
-        val minDarkPixelsPerColumn = max(4, bitmap.height / CONTENT_COLUMN_DARK_PIXEL_DIVISOR)
+        val maxRowDarkCount = rowDarkCounts.maxOrNull() ?: 0
+        val maxColumnDarkCount = columnDarkCounts.maxOrNull() ?: 0
+        val widthFillFactor = renderSettings.widthFillPercent / 100f
+
+        val minDarkPixelsPerRow = max(
+            4,
+            max(
+                bitmap.width / CONTENT_ROW_DARK_PIXEL_DIVISOR,
+                (maxRowDarkCount * (BASE_ROW_ACTIVITY_RATIO * widthFillFactor)).toInt()
+            )
+        )
+        val minDarkPixelsPerColumn = max(
+            4,
+            max(
+                bitmap.height / CONTENT_COLUMN_DARK_PIXEL_DIVISOR,
+                (maxColumnDarkCount * (BASE_COLUMN_ACTIVITY_RATIO * widthFillFactor)).toInt()
+            )
+        )
 
         val top = rowDarkCounts.indexOfFirst { it >= minDarkPixelsPerRow }
         val bottom = rowDarkCounts.indexOfLast { it >= minDarkPixelsPerRow }
@@ -324,6 +356,11 @@ class PrinterDriver @Inject constructor(
         val blue = pixel and 0xFF
         val grayscale = (red * 0.299f) + (green * 0.587f) + (blue * 0.114f)
         return grayscale < RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD
+    }
+
+    private fun SystemPrintRenderSettings.toSystemPrintGrayscaleThreshold(): Float {
+        return (SYSTEM_PRINT_GRAYSCALE_THRESHOLD * (darknessPercent / 100f))
+            .coerceIn(MIN_SYSTEM_PRINT_GRAYSCALE_THRESHOLD, MAX_SYSTEM_PRINT_GRAYSCALE_THRESHOLD)
     }
 
     private fun processBlock(builder: EscPosBuilder, block: PrintBlock, profile: PrinterProfile) {
@@ -433,8 +470,12 @@ class PrinterDriver @Inject constructor(
         const val RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD = 210f
         const val SYSTEM_PRINT_RENDER_SCALE_FACTOR = 4
         const val SYSTEM_PRINT_GRAYSCALE_THRESHOLD = 232f
+        const val MIN_SYSTEM_PRINT_GRAYSCALE_THRESHOLD = 180f
+        const val MAX_SYSTEM_PRINT_GRAYSCALE_THRESHOLD = 250f
         const val SYSTEM_PRINT_BAND_HEIGHT_PX = 256
         const val CONTENT_ROW_DARK_PIXEL_DIVISOR = 250
         const val CONTENT_COLUMN_DARK_PIXEL_DIVISOR = 300
+        const val BASE_ROW_ACTIVITY_RATIO = 0.12f
+        const val BASE_COLUMN_ACTIVITY_RATIO = 0.12f
     }
 }

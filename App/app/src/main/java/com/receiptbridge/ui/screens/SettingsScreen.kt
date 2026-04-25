@@ -30,6 +30,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val settings by viewModel.settings.collectAsState()
+    val systemPrintRenderSettings by viewModel.systemPrintRenderSettings.collectAsState()
 
     Column(
         modifier = Modifier
@@ -79,6 +80,40 @@ fun SettingsScreen(
             title = "Auto-print on USB Connect",
             checked = settings.autoPrintOnConnect,
             onCheckedChange = { viewModel.updateSettings(settings.copy(autoPrintOnConnect = it)) }
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text("Android Print Service Tuning", style = MaterialTheme.typography.titleMedium)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        TextField(
+            value = systemPrintRenderSettings.widthFillPercent.toString(),
+            onValueChange = { input ->
+                if (input.all(Char::isDigit) && input.isNotBlank()) {
+                    viewModel.updateSystemPrintWidthFillPercent(input.toInt())
+                }
+            },
+            label = { Text("Content Width Fill (%)") },
+            supportingText = { Text("Raises how aggressively Android print content expands toward the full receipt width.") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        TextField(
+            value = systemPrintRenderSettings.darknessPercent.toString(),
+            onValueChange = { input ->
+                if (input.all(Char::isDigit) && input.isNotBlank()) {
+                    viewModel.updateSystemPrintDarknessPercent(input.toInt())
+                }
+            },
+            label = { Text("Content Darkness (%)") },
+            supportingText = { Text("Makes Android print-service receipts bolder for thermal printers.") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
         )
         
         Spacer(modifier = Modifier.height(24.dp))
