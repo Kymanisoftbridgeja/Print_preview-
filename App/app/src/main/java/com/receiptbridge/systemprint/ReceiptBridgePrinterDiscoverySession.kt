@@ -129,10 +129,10 @@ class ReceiptBridgePrinterDiscoverySession(
             .addMediaSize(mediaSize, true)
             .addResolution(
                 PrintAttributes.Resolution(
-                    "receiptbridge_203dpi",
-                    "Receipt 203 DPI",
-                    203,
-                    203
+                    "receiptbridge_600dpi",
+                    "Receipt 600 DPI",
+                    600,
+                    600
                 ),
                 true
             )

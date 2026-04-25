@@ -10,15 +10,22 @@ data class EscPosRasterImage(
     val rasterBytes: ByteArray
 )
 
+data class EscPosEncodingOptions(
+    val grayscaleThreshold: Float = 180f,
+    val bolden: Boolean = false,
+    val scaleWithFilter: Boolean = true
+)
+
 object EscPosImageEncoder {
     fun encodeBitmap(
         bitmap: Bitmap,
         targetWidth: Int,
-        targetHeight: Int? = null
+        targetHeight: Int? = null,
+        options: EscPosEncodingOptions = EscPosEncodingOptions()
     ): EscPosRasterImage {
-        val scaledBitmap = bitmap.scaleForEscPos(targetWidth, targetHeight)
+        val scaledBitmap = bitmap.scaleForEscPos(targetWidth, targetHeight, options.scaleWithFilter)
         return try {
-            scaledBitmap.toRasterImage()
+            scaledBitmap.toRasterImage(options)
         } finally {
             if (scaledBitmap !== bitmap) {
                 scaledBitmap.recycle()
@@ -56,7 +63,11 @@ object EscPosImageEncoder {
         }
     }
 
-    private fun Bitmap.scaleForEscPos(targetWidth: Int, targetHeight: Int?): Bitmap {
+    private fun Bitmap.scaleForEscPos(
+        targetWidth: Int,
+        targetHeight: Int?,
+        scaleWithFilter: Boolean
+    ): Bitmap {
         val safeTargetWidth = targetWidth.coerceAtLeast(1)
         val desiredWidth = if (targetHeight != null) {
             safeTargetWidth
@@ -70,10 +81,10 @@ object EscPosImageEncoder {
             return this
         }
 
-        return Bitmap.createScaledBitmap(this, desiredWidth, desiredHeight, true)
+        return Bitmap.createScaledBitmap(this, desiredWidth, desiredHeight, scaleWithFilter)
     }
 
-    private fun Bitmap.toRasterImage(): EscPosRasterImage {
+    private fun Bitmap.toRasterImage(options: EscPosEncodingOptions): EscPosRasterImage {
         val widthBytes = (width + 7) / 8
         val raster = ByteArray(widthBytes * height)
 
@@ -85,10 +96,13 @@ object EscPosImageEncoder {
                 val blue = pixel and 0xFF
                 val alpha = (pixel ushr 24) and 0xFF
                 val grayscale = (red * 0.299f) + (green * 0.587f) + (blue * 0.114f)
-                val shouldPrintBlack = alpha > 127 && grayscale < 180f
+                val shouldPrintBlack = alpha > 127 && grayscale < options.grayscaleThreshold
                 if (shouldPrintBlack) {
-                    val index = y * widthBytes + (x / 8)
-                    raster[index] = (raster[index].toInt() or (0x80 shr (x % 8))).toByte()
+                    raster.setBlackPixel(widthBytes, width, height, x, y)
+                    if (options.bolden) {
+                        raster.setBlackPixel(widthBytes, width, height, x + 1, y)
+                        raster.setBlackPixel(widthBytes, width, height, x, y + 1)
+                    }
                 }
             }
         }
@@ -98,5 +112,19 @@ object EscPosImageEncoder {
             height = height,
             rasterBytes = raster
         )
+    }
+
+    private fun ByteArray.setBlackPixel(
+        widthBytes: Int,
+        width: Int,
+        height: Int,
+        x: Int,
+        y: Int
+    ) {
+        if (x !in 0 until width || y !in 0 until height) {
+            return
+        }
+        val index = y * widthBytes + (x / 8)
+        this[index] = (this[index].toInt() or (0x80 shr (x % 8))).toByte()
     }
 }

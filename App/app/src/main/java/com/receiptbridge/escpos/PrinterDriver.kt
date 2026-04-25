@@ -213,9 +213,10 @@ class PrinterDriver @Inject constructor(
         profile: PrinterProfile
     ): EscPosRasterImage {
         val targetWidth = defaultImageWidthForPaperWidthMm(profile.paperWidthMm)
-        val scale = targetWidth.toFloat() / page.width.toFloat()
-        val targetHeight = (page.height * scale).toInt().coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        val renderWidth = targetWidth * SYSTEM_PRINT_RENDER_SCALE_FACTOR
+        val scale = renderWidth.toFloat() / page.width.toFloat()
+        val renderHeight = (page.height * scale).toInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
         return try {
             Canvas(bitmap).drawColor(Color.WHITE)
             val matrix = Matrix().apply {
@@ -224,7 +225,15 @@ class PrinterDriver @Inject constructor(
             page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
             val trimmedBitmap = trimContentBounds(bitmap)
             try {
-                EscPosImageEncoder.encodeBitmap(trimmedBitmap, targetWidth)
+                EscPosImageEncoder.encodeBitmap(
+                    bitmap = trimmedBitmap,
+                    targetWidth = targetWidth,
+                    options = EscPosEncodingOptions(
+                        grayscaleThreshold = SYSTEM_PRINT_GRAYSCALE_THRESHOLD,
+                        bolden = true,
+                        scaleWithFilter = true
+                    )
+                )
             } finally {
                 if (trimmedBitmap !== bitmap) {
                     trimmedBitmap.recycle()
@@ -407,5 +416,7 @@ class PrinterDriver @Inject constructor(
         const val RECEIPT_HORIZONTAL_TRIM_PADDING_PX = 12
         const val RECEIPT_MIN_ALPHA_THRESHOLD = 16
         const val RECEIPT_WHITESPACE_GRAYSCALE_THRESHOLD = 245f
+        const val SYSTEM_PRINT_RENDER_SCALE_FACTOR = 3
+        const val SYSTEM_PRINT_GRAYSCALE_THRESHOLD = 220f
     }
 }
