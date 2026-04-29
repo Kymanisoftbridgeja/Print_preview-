@@ -208,6 +208,13 @@ fun AddPrinterDialog(
     var printAreaDots by remember { mutableStateOf(defaultPrintAreaDotsForPaperWidthMm(PAPER_WIDTH_80_MM)) }
     var setAsDefault by remember(hasExistingDefault) { mutableStateOf(!hasExistingDefault) }
     var pendingBluetoothAction by remember { mutableStateOf<BluetoothAction?>(null) }
+    val resolvedProfileName = remember(name, type, address) {
+        resolveProfileName(
+            typedName = name,
+            type = type,
+            address = address
+        )
+    }
     
     val usbDevices = remember { viewModel.getUsbDevices() }
     var runBluetoothAction by remember { mutableStateOf<(BluetoothAction) -> Unit>({}) }
@@ -281,7 +288,8 @@ fun AddPrinterDialog(
                 TextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Profile Name") },
+                    label = { Text("Profile Name (optional)") },
+                    placeholder = { Text(defaultProfileNameHint(type, address)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 
@@ -561,8 +569,17 @@ fun AddPrinterDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(name, type, address, setAsDefault, paperWidthMm, printAreaDots) },
-                enabled = name.isNotBlank() && address.isNotBlank()
+                onClick = {
+                    onConfirm(
+                        resolvedProfileName,
+                        type,
+                        address.trim(),
+                        setAsDefault,
+                        paperWidthMm,
+                        printAreaDots
+                    )
+                },
+                enabled = resolvedProfileName.isNotBlank() && address.trim().isNotBlank()
             ) {
                 Text("Add")
             }
@@ -573,6 +590,61 @@ fun AddPrinterDialog(
             }
         }
     )
+}
+
+private fun defaultProfileNameHint(
+    type: ConnectionType,
+    address: String
+): String {
+    return defaultProfileNameFor(type, address).ifBlank {
+        when (type) {
+            ConnectionType.NETWORK -> "Network Printer"
+            ConnectionType.BLUETOOTH -> "Bluetooth Printer"
+            ConnectionType.USB -> "USB Printer"
+        }
+    }
+}
+
+private fun resolveProfileName(
+    typedName: String,
+    type: ConnectionType,
+    address: String
+): String {
+    val trimmedName = typedName.trim()
+    if (trimmedName.isNotBlank()) {
+        return trimmedName
+    }
+    return defaultProfileNameFor(type, address)
+}
+
+private fun defaultProfileNameFor(
+    type: ConnectionType,
+    address: String
+): String {
+    val trimmedAddress = address.trim()
+    return when (type) {
+        ConnectionType.NETWORK -> {
+            if (trimmedAddress.isBlank()) {
+                "Network Printer"
+            } else {
+                "Network Printer $trimmedAddress"
+            }
+        }
+        ConnectionType.BLUETOOTH -> {
+            if (trimmedAddress.isBlank()) {
+                "Bluetooth Printer"
+            } else {
+                "Bluetooth Printer $trimmedAddress"
+            }
+        }
+        ConnectionType.USB -> {
+            if (trimmedAddress.isBlank()) {
+                "USB Printer"
+            } else {
+                "USB Printer $trimmedAddress"
+            }
+        }
+    }
 }
 
 private fun bluetoothScanPermissions(): List<String> {
