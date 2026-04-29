@@ -51,7 +51,7 @@ fun HomeScreen(
     ) {
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("ReceiptBridge", style = MaterialTheme.typography.headlineMedium)
+                Text("Softbridge", style = MaterialTheme.typography.headlineMedium)
                 Text(
                     text = "Build ${BuildConfig.VERSION_NAME}",
                     style = MaterialTheme.typography.bodySmall,
@@ -110,7 +110,7 @@ fun HomeScreen(
                     }
                     androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "To use these printers from Android's print dialog, enable ReceiptBridge Print Service in your device's print settings.",
+                        text = "To use these printers from Android's print dialog, enable Softbridge Print Service in your device's print settings.",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }

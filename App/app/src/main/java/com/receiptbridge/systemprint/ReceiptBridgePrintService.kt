@@ -50,7 +50,7 @@ class ReceiptBridgePrintService : PrintService() {
             val localId = printerId.localId
             val profile = resolveProfile(localId)
             if (profile == null) {
-                printJob.fail("ReceiptBridge could not find an available saved printer.")
+                printJob.fail("Softbridge could not find an available saved printer.")
                 activePrintJobs.remove(printJob.id)
                 return@launch
             }

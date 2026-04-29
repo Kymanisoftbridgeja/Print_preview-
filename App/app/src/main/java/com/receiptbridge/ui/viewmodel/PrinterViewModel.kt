@@ -619,7 +619,7 @@ class PrinterViewModel @Inject constructor(
                 addProperty("type", "escpos_blocks")
                 add("blocks", JsonArray().apply {
                     addCommand("align", "center")
-                    addCommand("text", "ReceiptBridge Connection Test")
+                    addCommand("text", "Softbridge Connection Test")
                     addCommand("text", profile.name)
                     addCommand("align", "left")
                     addCommand("text", "Paper: ${profile.paperWidthMm} mm")

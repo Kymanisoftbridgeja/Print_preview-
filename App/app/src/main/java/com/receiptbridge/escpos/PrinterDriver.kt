@@ -905,7 +905,7 @@ class PrinterDriver @Inject constructor(
 
             val centerX = pageWidth / 2f
             canvas.drawOval(centerX - 130f, 130f, centerX + 130f, 250f, logoPaint)
-            canvas.drawText("ReceiptBridge", centerX, 225f, titlePaint)
+            canvas.drawText("Softbridge", centerX, 225f, titlePaint)
             canvas.drawText("Width Settings Test", centerX, 315f, centeredBodyPaint)
 
             var y = 400f
