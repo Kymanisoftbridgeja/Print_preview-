@@ -14,6 +14,9 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -100,8 +103,16 @@ fun ProfilesScreen(
                 }
             }
             
-            LazyColumn {
-                items(profiles) { profile ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(bottom = 96.dp)
+            ) {
+                items(
+                    items = profiles,
+                    key = { profile -> profile.id }
+                ) { profile ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -262,7 +273,11 @@ fun AddPrinterDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add Printer") },
         text = {
-            Column {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
                 TextField(
                     value = name,
                     onValueChange = { name = it },

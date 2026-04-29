@@ -8,7 +8,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import com.receiptbridge.R
 import com.receiptbridge.data.PrintJobFactory
 import com.receiptbridge.data.repository.JobRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -24,6 +23,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,7 +37,10 @@ class WebServer : Service() {
     lateinit var jobRepository: JobRepository
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val serverLock = Any()
     private var server: io.ktor.server.engine.ApplicationEngine? = null
+    @Volatile
+    private var isServerStarting = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -69,11 +72,16 @@ class WebServer : Service() {
     }
 
     private fun startServer() {
-        if (server != null) return
+        synchronized(serverLock) {
+            if (server != null || isServerStarting) {
+                return
+            }
+            isServerStarting = true
+        }
 
         serviceScope.launch {
             try {
-                server = embeddedServer(CIO, port = 9900) {
+                val createdServer = embeddedServer(CIO, port = 9900) {
                     install(ContentNegotiation) {
                         gson { }
                     }
@@ -105,16 +113,29 @@ class WebServer : Service() {
                             ))
                         }
                     }
-                }.start(wait = true)
+                }
+                createdServer.start(wait = false)
+                server = createdServer
             } catch (e: Exception) {
                 e.printStackTrace()
+                server?.stop(1000, 2000)
+                server = null
                 stopSelf() // Stop service if server fails
+            } finally {
+                synchronized(serverLock) {
+                    isServerStarting = false
+                }
             }
         }
     }
 
     override fun onDestroy() {
-        server?.stop(1000, 2000)
+        synchronized(serverLock) {
+            server?.stop(1000, 2000)
+            server = null
+            isServerStarting = false
+        }
+        serviceScope.cancel()
         super.onDestroy()
     }
 }

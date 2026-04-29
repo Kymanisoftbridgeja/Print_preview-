@@ -34,6 +34,7 @@ import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -1022,12 +1023,22 @@ class PrinterDriver @Inject constructor(
         profile: PrinterProfile,
         contentFillPercent: Int
     ): List<EscPosRasterImage> {
+        if (page.width <= 0 || page.height <= 0) {
+            return emptyList()
+        }
+
         val targetWidth = profile.resolvedPrintAreaDots()
         val sanitizedFillPercent = sanitizeSystemPrintContentFillPercent(contentFillPercent)
         val targetContentWidth = ((targetWidth * (sanitizedFillPercent / 100f)).roundToInt())
             .coerceIn(1, targetWidth)
-        val renderWidth = targetWidth * SYSTEM_PRINT_RENDER_SCALE_FACTOR
-        val scale = renderWidth.toFloat() / page.width.toFloat()
+        val preferredScale = (targetWidth * SYSTEM_PRINT_RENDER_SCALE_FACTOR).toFloat() / page.width.toFloat()
+        // Cap the render size so repeated Android print jobs do not allocate huge page bitmaps.
+        val scale = minOf(
+            preferredScale,
+            SYSTEM_PRINT_MAX_RENDER_HEIGHT_PX.toFloat() / page.height.toFloat(),
+            sqrt(SYSTEM_PRINT_MAX_RENDER_PIXELS.toDouble() / (page.width.toDouble() * page.height.toDouble())).toFloat()
+        )
+        val renderWidth = (page.width * scale).roundToInt().coerceAtLeast(1)
         val renderHeight = (page.height * scale).toInt().coerceAtLeast(1)
         val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
         return try {
@@ -1380,6 +1391,8 @@ class PrinterDriver @Inject constructor(
         const val SYSTEM_PRINT_RENDER_SCALE_FACTOR = 4
         const val SYSTEM_PRINT_FIXED_GRAYSCALE_THRESHOLD = 232f
         const val SYSTEM_PRINT_RASTER_BAND_HEIGHT_PX = 240
+        const val SYSTEM_PRINT_MAX_RENDER_HEIGHT_PX = 8192
+        const val SYSTEM_PRINT_MAX_RENDER_PIXELS = 16_000_000L
         const val CONTENT_ROW_DARK_PIXEL_DIVISOR = 250
         const val CONTENT_COLUMN_DARK_PIXEL_DIVISOR = 300
         const val BASE_ROW_ACTIVITY_RATIO = 0.12f

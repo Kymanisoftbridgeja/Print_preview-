@@ -1,5 +1,7 @@
 package com.receiptbridge.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
@@ -58,6 +61,8 @@ fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .imePadding()
             .padding(16.dp)
     ) {
         Text("Global Print Settings", style = MaterialTheme.typography.titleLarge)
@@ -211,6 +216,8 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(24.dp))
         
         Text("App Version: 1.1.0", style = MaterialTheme.typography.bodyMedium)
+
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 

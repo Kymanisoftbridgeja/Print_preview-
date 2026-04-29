@@ -1,6 +1,8 @@
 package com.receiptbridge.ui.screens
 
 import android.content.Intent
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +39,7 @@ fun HomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
         Text("ReceiptBridge", style = MaterialTheme.typography.headlineMedium)
@@ -124,5 +127,7 @@ fun HomeScreen(
         ) {
             Text("Settings")
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
