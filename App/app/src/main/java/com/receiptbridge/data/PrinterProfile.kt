@@ -2,6 +2,7 @@ package com.receiptbridge.data
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
 
@@ -65,3 +66,54 @@ fun defaultCharactersPerLineForPrintAreaDots(printAreaDots: Int): Int {
 fun PrinterProfile.resolvedPrintAreaDots(): Int {
     return sanitizePrintAreaDots(printAreaDots)
 }
+
+fun PrinterProfile.systemPrintLocalId(): String {
+    return buildString {
+        append(SYSTEM_PRINT_ID_PREFIX)
+        append(connectionType.name)
+        append(SYSTEM_PRINT_ID_SEPARATOR)
+        append(normalizedSystemPrintAddress())
+    }
+}
+
+fun PrinterProfile.normalizedSystemPrintAddress(): String {
+    return address.trim().lowercase(Locale.US)
+}
+
+fun parseSystemPrintLocalId(localId: String): SystemPrintProfileSelector? {
+    if (!localId.startsWith(SYSTEM_PRINT_ID_PREFIX)) {
+        return null
+    }
+
+    val payload = localId.removePrefix(SYSTEM_PRINT_ID_PREFIX)
+    val separatorIndex = payload.indexOf(SYSTEM_PRINT_ID_SEPARATOR)
+    if (separatorIndex <= 0 || separatorIndex == payload.lastIndex) {
+        return null
+    }
+
+    val connectionType = runCatching {
+        ConnectionType.valueOf(payload.substring(0, separatorIndex))
+    }.getOrNull() ?: return null
+
+    val normalizedAddress = payload.substring(separatorIndex + 1).trim()
+    if (normalizedAddress.isBlank()) {
+        return null
+    }
+
+    return SystemPrintProfileSelector(
+        connectionType = connectionType,
+        normalizedAddress = normalizedAddress
+    )
+}
+
+fun looksLikeLegacyPrinterProfileId(localId: String): Boolean {
+    return runCatching { UUID.fromString(localId) }.isSuccess
+}
+
+data class SystemPrintProfileSelector(
+    val connectionType: ConnectionType,
+    val normalizedAddress: String
+)
+
+private const val SYSTEM_PRINT_ID_PREFIX = "receiptbridge:"
+private const val SYSTEM_PRINT_ID_SEPARATOR = '|'

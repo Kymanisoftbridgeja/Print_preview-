@@ -9,6 +9,7 @@ import android.printservice.PrinterDiscoverySession
 import dagger.hilt.android.EntryPointAccessors
 import com.receiptbridge.data.PAPER_WIDTH_58_MM
 import com.receiptbridge.data.PrinterProfile
+import com.receiptbridge.data.systemPrintLocalId
 import com.receiptbridge.data.resolvedPrintAreaDots
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,7 +58,7 @@ class ReceiptBridgePrinterDiscoverySession(
         sessionScope.launch {
             val profiles = printerRepository.allProfiles.first()
             val printersToUpdate = profiles
-                .filter { profile -> printerIds.contains(printerIdFactory(profile.id)) }
+                .filter { profile -> printerIds.contains(printerIdFactory(profile.systemPrintLocalId())) }
                 .map(::buildPrinterInfo)
             if (printersToUpdate.isNotEmpty()) {
                 addPrinters(printersToUpdate)
@@ -90,7 +91,7 @@ class ReceiptBridgePrinterDiscoverySession(
     }
 
     private fun buildPrinterInfo(profile: PrinterProfile): PrinterInfo {
-        val printerId = printerIdFactory(profile.id)
+        val printerId = printerIdFactory(profile.systemPrintLocalId())
         val description = buildString {
             append(profile.connectionType.name)
             append(" - ")

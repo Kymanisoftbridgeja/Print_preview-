@@ -4,12 +4,18 @@ import android.print.PrintJobId
 import android.printservice.PrintJob
 import android.printservice.PrintService
 import android.printservice.PrinterDiscoverySession
+import android.util.Log
+import com.receiptbridge.data.PrinterProfile
+import com.receiptbridge.data.looksLikeLegacyPrinterProfileId
+import com.receiptbridge.data.normalizedSystemPrintAddress
+import com.receiptbridge.data.parseSystemPrintLocalId
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
@@ -40,8 +46,9 @@ class ReceiptBridgePrintService : PrintService() {
                 return@launch
             }
 
-            val profileId = printerId.localId
-            val profile = entryPoint.printerRepository().getProfileById(profileId)
+            val localId = printerId.localId
+            val profiles = entryPoint.printerRepository().allProfiles.first()
+            val profile = resolveProfile(localId, profiles)
             if (profile == null) {
                 printJob.fail("Saved printer profile was not found.")
                 activePrintJobs.remove(printJob.id)
@@ -84,5 +91,39 @@ class ReceiptBridgePrintService : PrintService() {
     override fun onDestroy() {
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    private fun resolveProfile(
+        localId: String,
+        profiles: List<PrinterProfile>
+    ): PrinterProfile? {
+        profiles.firstOrNull { it.id == localId }?.let { return it }
+
+        parseSystemPrintLocalId(localId)?.let { selector ->
+            profiles.firstOrNull { profile ->
+                profile.connectionType == selector.connectionType &&
+                    profile.normalizedSystemPrintAddress() == selector.normalizedAddress
+            }?.let { return it }
+        }
+
+        if (profiles.size == 1) {
+            Log.w(TAG, "Falling back to the only saved printer for unresolved localId=$localId")
+            return profiles.single()
+        }
+
+        if (looksLikeLegacyPrinterProfileId(localId)) {
+            val fallbackProfile = profiles.firstOrNull { it.isDefault } ?: profiles.firstOrNull()
+            if (fallbackProfile != null) {
+                Log.w(TAG, "Falling back to default printer for legacy localId=$localId")
+            }
+            return fallbackProfile
+        }
+
+        Log.w(TAG, "No saved printer matched localId=$localId")
+        return null
+    }
+
+    private companion object {
+        const val TAG = "ReceiptBridgePrintSvc"
     }
 }

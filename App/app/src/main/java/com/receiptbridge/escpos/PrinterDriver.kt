@@ -811,8 +811,8 @@ class PrinterDriver @Inject constructor(
     private fun createSeekablePdfCopy(documentData: ParcelFileDescriptor): File {
         val spoolFile = File.createTempFile("receiptbridge-print-", ".pdf", context.cacheDir)
         try {
-            documentData.use { sourceDescriptor ->
-                ParcelFileDescriptor.AutoCloseInputStream(sourceDescriptor).use { input ->
+            ParcelFileDescriptor.dup(documentData.fileDescriptor).use { sourceCopy ->
+                ParcelFileDescriptor.AutoCloseInputStream(sourceCopy).use { input ->
                     FileOutputStream(spoolFile).use { output ->
                         input.copyTo(output)
                         output.fd.sync()
