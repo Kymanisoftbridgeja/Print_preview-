@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.receiptbridge.BuildConfig
 import com.receiptbridge.server.WebServer
 import com.receiptbridge.data.resolvedPrintAreaDots
 import com.receiptbridge.ui.viewmodel.PrinterViewModel
@@ -36,16 +38,26 @@ fun HomeScreen(
     val profiles by viewModel.profiles.collectAsState(initial = emptyList())
     val printerActionMessage by viewModel.printerActionMessage.collectAsState()
     val defaultProfile = profiles.firstOrNull { it.isDefault } ?: profiles.firstOrNull()
+    val listState = rememberLazyListState()
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .navigationBarsPadding(),
+        state = listState,
+        userScrollEnabled = true,
         contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            Text("ReceiptBridge", style = MaterialTheme.typography.headlineMedium)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text("ReceiptBridge", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    text = "Build ${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
 
         item {

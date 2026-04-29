@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -35,6 +36,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.receiptbridge.BuildConfig
 import com.receiptbridge.data.MAX_KEEP_HISTORY_DAYS
 import com.receiptbridge.data.MAX_SYSTEM_PRINT_CONTENT_FILL_PERCENT
 import com.receiptbridge.data.MIN_KEEP_HISTORY_DAYS
@@ -58,12 +60,15 @@ fun SettingsScreen(
         mutableFloatStateOf(settings.systemPrintContentFillPercent.toFloat())
     }
     val defaultProfile = printerProfiles.firstOrNull { it.isDefault } ?: printerProfiles.firstOrNull()
+    val listState = rememberLazyListState()
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
             .navigationBarsPadding(),
+        state = listState,
+        userScrollEnabled = true,
         contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 32.dp)
     ) {
         item {
@@ -218,7 +223,7 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Text("App Version: 1.1.0", style = MaterialTheme.typography.bodyMedium)
+                Text("App Version: ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
