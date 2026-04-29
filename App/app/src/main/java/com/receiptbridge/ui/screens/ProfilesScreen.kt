@@ -291,6 +291,7 @@ fun AddPrinterDialog(
                         onClick = {
                             type = ConnectionType.NETWORK
                             address = "192.168.1.100"
+                            viewModel.clearNetworkAddressTestMessage()
                         },
                         enabled = type != ConnectionType.NETWORK,
                         modifier = Modifier.weight(1f)
@@ -302,6 +303,7 @@ fun AddPrinterDialog(
                         onClick = {
                             type = ConnectionType.BLUETOOTH
                             address = ""
+                            viewModel.clearNetworkAddressTestMessage()
                         },
                         enabled = type != ConnectionType.BLUETOOTH,
                         modifier = Modifier.weight(1f)
@@ -313,6 +315,7 @@ fun AddPrinterDialog(
                         onClick = {
                             type = ConnectionType.USB
                             address = ""
+                            viewModel.clearNetworkAddressTestMessage()
                         },
                         enabled = type != ConnectionType.USB,
                         modifier = Modifier.weight(1f)
@@ -413,16 +416,58 @@ fun AddPrinterDialog(
                     )
                 } else if (type == ConnectionType.NETWORK) {
                     val ipDevices by viewModel.foundIpDevices.collectAsState()
-                    Button(onClick = { viewModel.scanNetwork() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Scan Network (Port 9100)")
+                    val isNetworkScanning by viewModel.isNetworkScanning.collectAsState()
+                    val networkScanMessage by viewModel.networkScanMessage.collectAsState()
+                    val isTestingNetworkAddress by viewModel.isTestingNetworkAddress.collectAsState()
+                    val networkAddressTestMessage by viewModel.networkAddressTestMessage.collectAsState()
+                    Text(
+                        text = "Find printers on the same network or type the printer IP manually. You can also enter a custom raw-print port using IP:PORT.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = { viewModel.scanNetwork() },
+                            enabled = !isNetworkScanning,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (isNetworkScanning) "Scanning..." else "Scan Network")
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = { viewModel.testNetworkAddress(address) },
+                            enabled = address.isNotBlank() && !isTestingNetworkAddress,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (isTestingNetworkAddress) "Testing..." else "Test Address")
+                        }
+                    }
+                    networkScanMessage?.let { message ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (ipDevices.isEmpty()) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            }
+                        )
                     }
                     LazyColumn(modifier = Modifier.height(100.dp)) {
-                        items(ipDevices) { ip ->
+                        items(ipDevices, key = { ip -> ip }) { ip ->
                             Text(
                                 text = ip,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { address = ip }
+                                    .clickable {
+                                        address = ip
+                                        viewModel.clearNetworkAddressTestMessage()
+                                        if (name.isBlank()) {
+                                            name = "Network Printer $ip"
+                                        }
+                                    }
                                     .padding(8.dp),
                                 color = if (address == ip) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                             )
@@ -430,10 +475,26 @@ fun AddPrinterDialog(
                     }
                     TextField(
                         value = address,
-                        onValueChange = { address = it },
-                        label = { Text("IP Address") },
+                        onValueChange = {
+                            address = it
+                            viewModel.clearNetworkAddressTestMessage()
+                        },
+                        label = { Text("IP Address or IP:Port") },
+                        placeholder = { Text("192.168.1.50 or 192.168.1.50:9100") },
                         modifier = Modifier.fillMaxWidth()
                     )
+                    networkAddressTestMessage?.let { message ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (message.startsWith("Connection successful")) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
                 } else {
                     TextField(
                         value = address,

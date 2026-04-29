@@ -83,6 +83,18 @@ class PrinterViewModel @Inject constructor(
     private val _foundIpDevices = MutableStateFlow<List<String>>(emptyList())
     val foundIpDevices: StateFlow<List<String>> = _foundIpDevices.asStateFlow()
 
+    private val _isNetworkScanning = MutableStateFlow(false)
+    val isNetworkScanning: StateFlow<Boolean> = _isNetworkScanning.asStateFlow()
+
+    private val _networkScanMessage = MutableStateFlow<String?>(null)
+    val networkScanMessage: StateFlow<String?> = _networkScanMessage.asStateFlow()
+
+    private val _isTestingNetworkAddress = MutableStateFlow(false)
+    val isTestingNetworkAddress: StateFlow<Boolean> = _isTestingNetworkAddress.asStateFlow()
+
+    private val _networkAddressTestMessage = MutableStateFlow<String?>(null)
+    val networkAddressTestMessage: StateFlow<String?> = _networkAddressTestMessage.asStateFlow()
+
     private val _printerActionMessage = MutableStateFlow<String?>(null)
     val printerActionMessage: StateFlow<String?> = _printerActionMessage.asStateFlow()
 
@@ -177,21 +189,73 @@ class PrinterViewModel @Inject constructor(
     }
 
     fun scanNetwork() {
-        viewModelScope.launch {
-            _foundIpDevices.value = emptyList()
-            val reachableDevices = withContext(Dispatchers.IO) {
-                getLocalSubnets()
-                    .flatMap(::buildCandidateIps)
-                    .flatMap { ip ->
-                        listOf(async { if (isPortOpen(ip, 9100)) ip else null })
-                    }
-                    .awaitAll()
-                    .filterNotNull()
-                    .distinct()
-                    .sortedBy(::ipSortKey)
-            }
-            _foundIpDevices.value = reachableDevices
+        if (_isNetworkScanning.value) {
+            return
         }
+
+        viewModelScope.launch {
+            _isNetworkScanning.value = true
+            _foundIpDevices.value = emptyList()
+            _networkScanMessage.value = "Scanning your local network for printers on port 9100..."
+            try {
+                val reachableDevices = withContext(Dispatchers.IO) {
+                    getLocalSubnets()
+                        .flatMap(::buildCandidateIps)
+                        .flatMap { ip ->
+                            listOf(async { if (isPortOpen(ip, DEFAULT_NETWORK_PRINTER_PORT)) ip else null })
+                        }
+                        .awaitAll()
+                        .filterNotNull()
+                        .distinct()
+                        .sortedBy(::ipSortKey)
+                }
+                _foundIpDevices.value = reachableDevices
+                _networkScanMessage.value = if (reachableDevices.isEmpty()) {
+                    "No printers answered on port 9100. You can still add the printer manually using its IP address."
+                } else {
+                    "Found ${reachableDevices.size} reachable network printer address${if (reachableDevices.size == 1) "" else "es"}. Tap one to use it or type an IP manually."
+                }
+            } catch (error: Exception) {
+                _networkScanMessage.value = "Network scan failed: ${error.message ?: "Unknown error"}"
+            } finally {
+                _isNetworkScanning.value = false
+            }
+        }
+    }
+
+    fun testNetworkAddress(address: String) {
+        val target = parseNetworkTarget(address)
+        if (target == null) {
+            _networkAddressTestMessage.value = "Enter a valid printer address like 192.168.1.50 or 192.168.1.50:9100."
+            return
+        }
+
+        if (_isTestingNetworkAddress.value) {
+            return
+        }
+
+        viewModelScope.launch {
+            _isTestingNetworkAddress.value = true
+            try {
+                val connected = withContext(Dispatchers.IO) {
+                    isPortOpen(target.host, target.port, timeoutMs = NETWORK_TEST_TIMEOUT_MS)
+                }
+                _networkAddressTestMessage.value = if (connected) {
+                    "Connection successful to ${target.host}:${target.port}. Save this printer and run Connection Test next."
+                } else {
+                    "Could not reach ${target.host}:${target.port}. Make sure the printer is on the same network and that raw printing is enabled."
+                }
+            } catch (error: Exception) {
+                _networkAddressTestMessage.value =
+                    "Network test failed for ${target.host}:${target.port}: ${error.message ?: "Unknown error"}"
+            } finally {
+                _isTestingNetworkAddress.value = false
+            }
+        }
+    }
+
+    fun clearNetworkAddressTestMessage() {
+        _networkAddressTestMessage.value = null
     }
 
     private fun getLocalSubnets(): List<Ipv4Subnet> {
@@ -211,10 +275,10 @@ class PrinterViewModel @Inject constructor(
         }.getOrDefault(emptyList())
     }
 
-    private fun isPortOpen(ip: String, port: Int): Boolean {
+    private fun isPortOpen(ip: String, port: Int, timeoutMs: Int = PORT_PROBE_TIMEOUT_MS): Boolean {
         return try {
             val socket = Socket()
-            socket.connect(InetSocketAddress(ip, port), 200)
+            socket.connect(InetSocketAddress(ip, port), timeoutMs)
             socket.close()
             true
         } catch (e: Exception) {
@@ -290,6 +354,31 @@ class PrinterViewModel @Inject constructor(
     private fun longToIpv4(value: Long): String {
         return listOf(24, 16, 8, 0)
             .joinToString(".") { shift -> ((value shr shift) and 0xFF).toString() }
+    }
+
+    private fun parseNetworkTarget(address: String): NetworkTarget? {
+        val trimmedAddress = address.trim()
+        if (trimmedAddress.isBlank()) {
+            return null
+        }
+
+        val parts = trimmedAddress.split(":")
+        if (parts.size > 2) {
+            return null
+        }
+
+        val host = parts.first().trim()
+        if (host.isBlank()) {
+            return null
+        }
+
+        val port = if (parts.size == 2) {
+            parts[1].trim().toIntOrNull()?.takeIf { it in 1..65535 } ?: return null
+        } else {
+            DEFAULT_NETWORK_PRINTER_PORT
+        }
+
+        return NetworkTarget(host = host, port = port)
     }
 
     @SuppressLint("MissingPermission")
@@ -611,6 +700,11 @@ class PrinterViewModel @Inject constructor(
         val localAddress: Long
     )
 
+    private data class NetworkTarget(
+        val host: String,
+        val port: Int
+    )
+
     private fun buildTestPrintPayload(profile: PrinterProfile): String {
         val root = JsonObject().apply {
             addProperty("printer_profile_id", profile.id)
@@ -644,6 +738,9 @@ class PrinterViewModel @Inject constructor(
     private companion object {
         const val BLUETOOTH_SCAN_TIMEOUT_MS = 20_000L
         const val MAX_SCAN_HOSTS = 512L
+        const val DEFAULT_NETWORK_PRINTER_PORT = 9100
+        const val PORT_PROBE_TIMEOUT_MS = 200
+        const val NETWORK_TEST_TIMEOUT_MS = 1500
         val PRINTER_NAME_KEYWORDS = listOf(
             "printer",
             "woosim",
