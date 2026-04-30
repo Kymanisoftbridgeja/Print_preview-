@@ -770,10 +770,14 @@ class PrinterDriver @Inject constructor(
                                 }
 
                                 val finalizeBuilder = EscPosBuilder()
+                                val finalFeedLines = max(
+                                    profile.feedLines,
+                                    SYSTEM_PRINT_MIN_FINAL_FEED_LINES
+                                )
                                 if (profile.autoCut) {
-                                    finalizeBuilder.feed(profile.feedLines).cut()
+                                    finalizeBuilder.feed(finalFeedLines).cut()
                                 } else {
-                                    finalizeBuilder.feed(profile.feedLines)
+                                    finalizeBuilder.feed(finalFeedLines)
                                 }
                                 connection.write(finalizeBuilder.build())
                             }
@@ -1171,18 +1175,33 @@ class PrinterDriver @Inject constructor(
                 (maxColumnDarkCount * BASE_COLUMN_ACTIVITY_RATIO).toInt()
             )
         )
+        val relaxedBottomDarkPixelsPerRow = max(
+            1,
+            minDarkPixelsPerRow / SYSTEM_PRINT_BOTTOM_ROW_ACTIVITY_RELAX_DIVISOR
+        )
 
         val top = rowDarkCounts.indexOfFirst { it >= minDarkPixelsPerRow }
-        val bottom = rowDarkCounts.indexOfLast { it >= minDarkPixelsPerRow }
+        val bottom = rowDarkCounts.indexOfLast { it >= relaxedBottomDarkPixelsPerRow }
+        val softBottom = rowDarkCounts.indexOfLast { it >= SYSTEM_PRINT_MIN_BOTTOM_ROW_DARK_PIXELS }
         val left = columnDarkCounts.indexOfFirst { it >= minDarkPixelsPerColumn }
         val right = columnDarkCounts.indexOfLast { it >= minDarkPixelsPerColumn }
 
-        if (top == -1 || bottom == -1 || left == -1 || right == -1) {
+        if (top == -1 || left == -1 || right == -1) {
+            return null
+        }
+
+        val resolvedBottom = max(bottom, softBottom)
+        if (resolvedBottom == -1) {
             return null
         }
 
         val cropTop = (top - RECEIPT_VERTICAL_TRIM_PADDING_PX).coerceAtLeast(0)
-        val cropBottom = (bottom + RECEIPT_VERTICAL_TRIM_PADDING_PX).coerceAtMost(bitmap.height - 1)
+        // Preserve enough trailing space for footer/signature sections that sit low on the page.
+        val bottomTrimPadding = max(
+            RECEIPT_VERTICAL_TRIM_PADDING_PX,
+            (bitmap.width * SYSTEM_PRINT_BOTTOM_TRIM_PADDING_RATIO).roundToInt()
+        )
+        val cropBottom = (resolvedBottom + bottomTrimPadding).coerceAtMost(bitmap.height - 1)
         val cropLeft = (left - RECEIPT_HORIZONTAL_TRIM_PADDING_PX).coerceAtLeast(0)
         val cropRight = (right + RECEIPT_HORIZONTAL_TRIM_PADDING_PX).coerceAtMost(bitmap.width - 1)
 
@@ -1393,6 +1412,10 @@ class PrinterDriver @Inject constructor(
         const val SYSTEM_PRINT_RASTER_BAND_HEIGHT_PX = 240
         const val SYSTEM_PRINT_MAX_RENDER_HEIGHT_PX = 8192
         const val SYSTEM_PRINT_MAX_RENDER_PIXELS = 16_000_000L
+        const val SYSTEM_PRINT_MIN_FINAL_FEED_LINES = 8
+        const val SYSTEM_PRINT_MIN_BOTTOM_ROW_DARK_PIXELS = 2
+        const val SYSTEM_PRINT_BOTTOM_ROW_ACTIVITY_RELAX_DIVISOR = 3
+        const val SYSTEM_PRINT_BOTTOM_TRIM_PADDING_RATIO = 0.25f
         const val CONTENT_ROW_DARK_PIXEL_DIVISOR = 250
         const val CONTENT_COLUMN_DARK_PIXEL_DIVISOR = 300
         const val BASE_ROW_ACTIVITY_RATIO = 0.12f
