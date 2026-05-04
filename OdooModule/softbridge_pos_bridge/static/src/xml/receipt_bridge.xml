@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <t
+        t-name="softbridge_pos_bridge.ReceiptScreen"
+        t-inherit="point_of_sale.ReceiptScreen"
+        t-inherit-mode="extension"
+        owl="1"
+    >
+        <xpath expr="//div[contains(@class, 'receipt-options')]/div[contains(@class, 'd-flex gap-1')][1]" position="after">
+            <div class="d-flex gap-1" t-if="pos.config.softbridge_enabled &amp;&amp; pos.config.softbridge_manual_button">
+                <button class="button btn btn-lg btn-primary w-100 py-3" t-on-click="onSendToSoftbridgeClick">
+                    <i t-attf-class="fa {{sendToSoftbridge.status === 'loading' ? 'fa-fw fa-spin fa-circle-o-notch' : 'fa-paper-plane'}} me-1" />
+                    Send to Softbridge
+                </button>
+            </div>
+        </xpath>
+        <xpath expr="//div[contains(@class, 'notice')]" position="inside">
+            <div t-if="sendToSoftbridge.status === 'success'" class="text-success">
+                Softbridge receipt sent successfully
+            </div>
+            <div t-if="sendToSoftbridge.status === 'success' and sendToSoftbridge.acceptedAs" class="text-muted small">
+                Accepted by bridge as: <t t-esc="sendToSoftbridge.acceptedAs"/>
+            </div>
+            <div t-if="sendToSoftbridge.status === 'error'" class="text-danger">
+                Softbridge receipt failed. Check the Windows bridge settings.
+            </div>
+        </xpath>
+    </t>
+
+</templates>

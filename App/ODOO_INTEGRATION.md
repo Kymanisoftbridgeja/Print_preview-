@@ -39,6 +39,64 @@ fetch("http://127.0.0.1:9900/print", {
 
 Note: HTTPS pages may block HTTP localhost requests depending on the browser and kiosk environment.
 
+### Option A2: Print the receipt already shown on the Odoo screen (Windows desktop bridge)
+
+Use this when Odoo has already rendered the receipt in the browser and you want to send what the cashier sees.
+
+#### Send receipt text
+
+```javascript
+const receiptElement =
+  document.querySelector(".pos-receipt") ||
+  document.querySelector(".receipt-screen") ||
+  document.querySelector("[data-receipt]");
+
+if (!receiptElement) {
+  throw new Error("Receipt element not found. Update the selector for your Odoo screen.");
+}
+
+const payload = {
+  content: {
+    type: "receipt_text",
+    text: receiptElement.innerText
+  }
+};
+
+fetch("http://127.0.0.1:9900/print", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(payload)
+});
+```
+
+#### Send receipt HTML
+
+```javascript
+const receiptElement =
+  document.querySelector(".pos-receipt") ||
+  document.querySelector(".receipt-screen") ||
+  document.querySelector("[data-receipt]");
+
+if (!receiptElement) {
+  throw new Error("Receipt element not found. Update the selector for your Odoo screen.");
+}
+
+const payload = {
+  content: {
+    type: "receipt_html",
+    html: receiptElement.innerHTML
+  }
+};
+
+fetch("http://127.0.0.1:9900/print", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(payload)
+});
+```
+
+`receipt_text` is the safest starting point because it prints exactly the text visible on the screen. `receipt_html` is useful when you want the bridge to extract rows and line breaks from the rendered receipt markup. This screen-derived path is currently implemented in the Windows desktop bridge.
+
 ### Option B: Deep link
 
 Use this when the browser cannot call the local server directly.
@@ -82,8 +140,10 @@ class ReceiptController(http.Controller):
 - `printer_profile_id`: optional profile id to route the job to a specific printer.
 - `paper_size`: optional, informational.
 - `copies`: optional integer, defaults to `1`.
-- `content.type`: currently `escpos_blocks`.
-- `content.blocks`: ordered ESC/POS block list.
+- `content.type`: `escpos_blocks` everywhere, plus `receipt_text` and `receipt_html` in the Windows desktop bridge.
+- `content.blocks`: ordered ESC/POS block list for `escpos_blocks`.
+- `content.text`: plain receipt text for `receipt_text`.
+- `content.html`: rendered receipt HTML for `receipt_html`.
 
 ### Supported blocks
 

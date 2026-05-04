@@ -1,0 +1,2 @@
+JAVA_VERSION="17.0.18"
+MODULES="java.base java.datatransfer java.xml java.prefs java.desktop java.instrument java.logging java.management java.transaction.xa java.sql jdk.crypto.ec jdk.unsupported"

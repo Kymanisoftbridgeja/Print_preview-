@@ -21,6 +21,57 @@ ReceiptBridge is an Android application that bypasses the system print preview a
 3. Grant Bluetooth and notification permissions when prompted.
 4. Connect at least one printer and mark a default printer, or pass `printer_profile_id` in each job.
 
+## Deployment Build
+
+This project deploys as an Android package, so the executable artifact is an `APK` or `AAB` rather than a Windows `.exe`.
+
+### Build a release artifact
+
+Run:
+
+```powershell
+.\build-release.ps1
+```
+
+That builds the release APK and copies it to `dist/`.
+
+### Build a signed release
+
+1. Copy `keystore.properties.example` to `keystore.properties`.
+2. Fill in your release keystore path and passwords.
+3. Run:
+
+```powershell
+.\build-release.ps1 -Artifact both
+```
+
+You can also provide signing values with environment variables:
+
+- `RELEASE_STORE_FILE`
+- `RELEASE_STORE_PASSWORD`
+- `RELEASE_KEY_ALIAS`
+- `RELEASE_KEY_PASSWORD`
+
+The script will place the finished artifacts in `dist/`.
+If no release keystore is configured, the filenames will include `-unsigned`.
+
+## Repository Layout
+
+- `App/` contains the Android application source.
+- `WindowsExecutable/` contains the separate Windows desktop app and packaged output flow.
+
+## Windows Desktop App
+
+The Windows port lives in `WindowsExecutable/ReceiptBridgeDesktop/` and mirrors the Android app's main screens and local HTTP queue workflow.
+
+Build the Windows app image with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\WindowsExecutable\build-windows-app.ps1
+```
+
+That copies a runnable desktop image into `WindowsExecutable/dist/`, including the launcher executable at `WindowsExecutable/dist/ReceiptBridgeDesktop/ReceiptBridgeDesktop.exe`.
+
 ## Usage
 
 ### 1. Configure printers

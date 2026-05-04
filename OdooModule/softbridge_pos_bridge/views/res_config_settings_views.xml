@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_inherit_softbridge_pos_bridge" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.softbridge.pos.bridge</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="point_of_sale.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//block[@id='pos_bills_and_receipts_section']" position="inside">
+                <setting
+                    id="softbridge_windows_bridge"
+                    string="Softbridge Windows Bridge"
+                    help="Send the POS receipt screen to the Softbridge Windows desktop bridge."
+                >
+                    <field name="pos_softbridge_enabled"/>
+                    <div class="content-group mt16" invisible="not pos_softbridge_enabled">
+                        <div class="row mt16">
+                            <label for="pos_softbridge_bridge_url" string="Bridge URL" class="col-lg-3 o_light_label"/>
+                            <field name="pos_softbridge_bridge_url"/>
+                        </div>
+                        <div class="row mt16">
+                            <label for="pos_softbridge_api_token" string="Bridge Token" class="col-lg-3 o_light_label"/>
+                            <field name="pos_softbridge_api_token" placeholder="Optional"/>
+                        </div>
+                        <div class="row mt16">
+                            <label for="pos_softbridge_payload_mode" string="Payload Mode" class="col-lg-3 o_light_label"/>
+                            <field name="pos_softbridge_payload_mode"/>
+                        </div>
+                        <div class="row mt16">
+                            <label for="pos_softbridge_request_timeout_ms" string="Timeout (ms)" class="col-lg-3 o_light_label"/>
+                            <field name="pos_softbridge_request_timeout_ms"/>
+                        </div>
+                        <div class="row mt16">
+                            <div class="col-lg-3"/>
+                            <div class="col-lg-9">
+                                <div>
+                                    <field name="pos_softbridge_auto_send_receipt"/>
+                                    <label for="pos_softbridge_auto_send_receipt" string="Auto-send when receipt screen opens" class="fw-normal ms-2"/>
+                                </div>
+                                <div class="mt8">
+                                    <field name="pos_softbridge_manual_button"/>
+                                    <label for="pos_softbridge_manual_button" string="Show Send to Softbridge button" class="fw-normal ms-2"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-muted mt16">
+                            The POS sends the rendered receipt to <code>/odoo/receipt</code> on the Windows bridge.
+                            Use <code>Rendered Receipt Image</code> for the closest visual match, or <code>Receipt Text</code> if you need the safest fallback.
+                        </div>
+                    </div>
+                </setting>
+            </xpath>
+        </field>
+    </record>
+</odoo>

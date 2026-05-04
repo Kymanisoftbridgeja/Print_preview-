@@ -1,9 +1,34 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
 }
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use(keystoreProperties::load)
+}
+
+fun readReleaseSigningValue(propertyName: String, envName: String): String? {
+    return providers.gradleProperty(propertyName).orNull
+        ?: keystoreProperties.getProperty(propertyName)
+        ?: providers.environmentVariable(envName).orNull
+}
+
+val releaseStoreFilePath = readReleaseSigningValue("storeFile", "RELEASE_STORE_FILE")
+val releaseStorePassword = readReleaseSigningValue("storePassword", "RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = readReleaseSigningValue("keyAlias", "RELEASE_KEY_ALIAS")
+val releaseKeyPassword = readReleaseSigningValue("keyPassword", "RELEASE_KEY_PASSWORD")
+val hasReleaseSigning =
+    !releaseStoreFilePath.isNullOrBlank() &&
+        !releaseStorePassword.isNullOrBlank() &&
+        !releaseKeyAlias.isNullOrBlank() &&
+        !releaseKeyPassword.isNullOrBlank()
 
 android {
     namespace = "com.receiptbridge"
@@ -22,10 +47,24 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {

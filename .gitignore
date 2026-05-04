@@ -4,4 +4,10 @@
 /build/
 /App/app/build/
 /local.properties
+/dist/
+/keystore.properties
+*.jks
+*.keystore
+/WindowsExecutable/dist/*
+!/WindowsExecutable/dist/.gitkeep
 *.iml

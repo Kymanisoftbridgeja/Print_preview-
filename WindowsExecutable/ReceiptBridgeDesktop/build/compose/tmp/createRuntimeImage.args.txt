@@ -1,0 +1,22 @@
+--add-modules
+"java.base"
+--add-modules
+"java.desktop"
+--add-modules
+"java.logging"
+--add-modules
+"jdk.crypto.ec"
+--add-modules
+"java.instrument"
+--add-modules
+"java.management"
+--add-modules
+"java.sql"
+--add-modules
+"jdk.unsupported"
+--strip-debug
+--no-header-files
+--no-man-pages
+--strip-native-commands
+--output
+"C:\\Users\\Johvaine Edwards\\Documents\\GitHub\\Print_preview-\\WindowsExecutable\\ReceiptBridgeDesktop\\build\\compose\\tmp\\main\\runtime"

@@ -16,5 +16,7 @@ dependencyResolutionManagement {
 rootProject.name = "ReceiptBridge"
 include(":app")
 project(":app").projectDir = file("App/app")
+include(":windowsApp")
+project(":windowsApp").projectDir = file("WindowsExecutable/ReceiptBridgeDesktop")
 
 // Trigger sync
