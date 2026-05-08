@@ -28,4 +28,22 @@
         </xpath>
     </t>
 
+    <t
+        t-name="softbridge_pos_bridge.ControlButtons"
+        t-inherit="point_of_sale.ControlButtons"
+        t-inherit-mode="extension"
+        owl="1"
+    >
+        <xpath expr="//div[hasclass('control-buttons-modal')]" position="inside">
+            <button
+                t-if="pos.config.module_pos_restaurant &amp;&amp; pos.config.softbridge_enabled &amp;&amp; pos.config.softbridge_restaurant_bill_action_enabled"
+                class="btn btn-primary btn-lg py-5"
+                t-att-disabled="!getSoftbridgeRestaurantBillOrderlineCount()"
+                t-on-click="onSendRestaurantBillToSoftbridgeClick"
+            >
+                <i class="fa fa-paper-plane me-1"/>Softbridge Bill
+            </button>
+        </xpath>
+    </t>
+
 </templates>

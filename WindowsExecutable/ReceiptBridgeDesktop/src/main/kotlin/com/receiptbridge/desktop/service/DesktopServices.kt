@@ -13,15 +13,21 @@ import com.receiptbridge.desktop.data.PrinterRepository
 import com.receiptbridge.desktop.data.SettingsRepository
 import com.receiptbridge.desktop.model.AppSettings
 import com.receiptbridge.desktop.model.ConnectionType
+import com.receiptbridge.desktop.model.DEFAULT_EXACT_LAYOUT_RENDERED_RECEIPT_FILL_PERCENT
+import com.receiptbridge.desktop.model.DEFAULT_SYSTEM_PRINT_CONTENT_FILL_PERCENT
 import com.receiptbridge.desktop.model.JobStatus
+import com.receiptbridge.desktop.model.OdooReceiptRenderMode
 import com.receiptbridge.desktop.model.PrintBlock
 import com.receiptbridge.desktop.model.PrintContent
 import com.receiptbridge.desktop.model.PrintJob
 import com.receiptbridge.desktop.model.PrintPayload
 import com.receiptbridge.desktop.model.PrinterProfile
+import com.receiptbridge.desktop.model.defaultRenderedReceiptFillPercentFor
+import com.receiptbridge.desktop.model.defaultOdooReceiptRenderModeFor
 import com.receiptbridge.desktop.model.defaultCharactersPerLineForPrintAreaDots
 import com.receiptbridge.desktop.model.defaultPrintAreaDotsForPaperWidthMm
 import com.receiptbridge.desktop.model.normalizePaperWidthMm
+import com.receiptbridge.desktop.model.resolvedOdooReceiptRenderMode
 import com.receiptbridge.desktop.model.resolvedPrintAreaDots
 import com.receiptbridge.desktop.model.resolvedRenderedReceiptFillPercent
 import com.receiptbridge.desktop.model.resolvedRenderedReceiptSmartFit
@@ -76,9 +82,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
@@ -98,6 +107,20 @@ data class WindowsPrinterQueue(
     val isDefault: Boolean = false,
     val queueName: String? = null,
     val portName: String? = null
+)
+
+private data class StructuredReceiptSummaryRow(
+    val label: String,
+    val amount: String,
+    val emphasis: Boolean = false,
+    val rightLabel: String = "",
+    val rightAmount: String = "",
+    val role: String = ""
+)
+
+private data class StructuredReceiptFooterSections(
+    val summaryRows: List<StructuredReceiptSummaryRow>,
+    val footerLines: List<String>
 )
 
 object PrintJobFactory {
@@ -716,12 +739,14 @@ object EscPosImageEncoder {
 }
 
 class PrinterDriver(
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val bridgeEventLog: BridgeEventLog
 ) {
     private val gson: Gson = GsonBuilder().create()
 
     suspend fun print(job: PrintJob, profile: PrinterProfile) {
-        withContext(Dispatchers.IO) {
+        try {
+            withContext(Dispatchers.IO) {
             val payload = try {
                 gson.fromJson(job.payloadJson, PrintPayload::class.java)
             } catch (error: Exception) {
@@ -733,11 +758,27 @@ class PrinterDriver(
                 connection.connect()
                 val settings = settingsRepository.settings.value
                 val builder = EscPosBuilder().reset().align("left")
-                val contentType = if (payload.content.structuredReceipt != null) {
-                    "odoo_structured"
-                } else {
-                    payload.content.type.lowercase(Locale.US)
+                val odooRenderMode = profile.resolvedOdooReceiptRenderMode()
+                val contentType = when {
+                    payload.content.structuredReceipt != null &&
+                        odooRenderMode == OdooReceiptRenderMode.EXACT_LAYOUT &&
+                        !payload.content.image.isNullOrBlank() -> {
+                        "receipt_image"
+                    }
+                    payload.content.structuredReceipt != null -> {
+                        "odoo_structured"
+                    }
+                    else -> {
+                        payload.content.type.lowercase(Locale.US)
+                    }
                 }
+                val qrBarcodeDetected = payload.content.structuredReceipt?.let(::structuredReceiptHasQrOrBarcode) == true ||
+                    !payload.content.image.isNullOrBlank()
+                bridgeEventLog.record(
+                    source = "printer",
+                    level = BridgeEventLevel.INFO,
+                    message = "Print job received: ${job.id}; type: ${describePrintPayloadForLog(job.payloadJson, contentType)}; printer selected: ${profile.name}; QR/barcode image detected: $qrBarcodeDetected."
+                )
 
                 appendConfiguredHeader(builder, settings, profile)
                 when (contentType) {
@@ -759,7 +800,8 @@ class PrinterDriver(
                             builder = builder,
                             imageBase64 = payload.content.image.orEmpty(),
                             profile = profile,
-                            settings = settings
+                            settings = settings,
+                            renderedImageMeta = payload.content.renderedImageMeta
                         )
                     }
                     "plain_text", "text", "receipt_text" -> {
@@ -791,9 +833,22 @@ class PrinterDriver(
                 repeat(resolveCopies(job, payload)) {
                     connection.write(data)
                 }
+                bridgeEventLog.record(
+                    source = "printer",
+                    level = BridgeEventLevel.INFO,
+                    message = "Print success: ${job.id} sent to ${profile.name} (${profile.connectionType})."
+                )
             } finally {
                 connection.disconnect()
             }
+            }
+        } catch (error: Exception) {
+            bridgeEventLog.record(
+                source = "printer",
+                level = BridgeEventLevel.ERROR,
+                message = "Print failure: ${job.id}; Windows printing returned: ${error.message ?: "Unknown error"}"
+            )
+            throw error
         }
     }
 
@@ -803,6 +858,29 @@ class PrinterDriver(
             payload.copies > 0 -> payload.copies
             else -> 1
         }
+    }
+
+    private fun describePrintPayloadForLog(
+        payloadJson: String,
+        resolvedContentType: String
+    ): String {
+        val root = runCatching { JsonParser.parseString(payloadJson).asJsonObject }.getOrNull()
+        val printType = root?.getOptionalString("print_type").orEmpty()
+        val documentType = root?.getOptionalString("document_type").orEmpty()
+        val orderName = root?.getOptionalString("order_name").orEmpty()
+        return listOf(printType, documentType, resolvedContentType, orderName)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .joinToString(" / ")
+            .ifBlank { resolvedContentType }
+    }
+
+    private fun structuredReceiptHasQrOrBarcode(structuredReceipt: JsonObject): Boolean {
+        return !structuredReceipt.getOptionalString("qr_value").isNullOrBlank() ||
+            !structuredReceipt.getOptionalString("qr_image").isNullOrBlank() ||
+            !structuredReceipt.getOptionalString("barcode_value").isNullOrBlank() ||
+            !structuredReceipt.getOptionalString("barcode_image").isNullOrBlank()
     }
 
     private fun appendConfiguredHeader(
@@ -839,14 +917,15 @@ class PrinterDriver(
         builder: EscPosBuilder,
         imageBase64: String,
         profile: PrinterProfile,
-        settings: AppSettings
+        settings: AppSettings,
+        renderedImageMeta: JsonObject? = null
     ) {
-        val targetWidth = resolveRenderedReceiptTargetWidth(profile, settings)
+        val targetWidth = resolveRenderedReceiptTargetWidth(profile, settings, renderedImageMeta)
         val images = EscPosImageEncoder.decodeBase64ImageBands(
             base64Data = imageBase64,
             targetWidth = targetWidth,
             allowUpscale = true,
-            smartFit = profile.resolvedRenderedReceiptSmartFit(),
+            smartFit = resolveRenderedReceiptSmartFit(profile, renderedImageMeta),
             options = EscPosEncodingOptions(
                 grayscaleThreshold = 212f,
                 bolden = true,
@@ -867,11 +946,39 @@ class PrinterDriver(
 
     private fun resolveRenderedReceiptTargetWidth(
         profile: PrinterProfile,
-        settings: AppSettings
+        settings: AppSettings,
+        renderedImageMeta: JsonObject? = null
     ): Int {
         val maxWidth = profile.resolvedPrintAreaDots()
-        val fillPercent = profile.resolvedRenderedReceiptFillPercent(settings.systemPrintContentFillPercent)
-        return ((maxWidth * (fillPercent / 100f)).roundToInt()).coerceIn(1, maxWidth)
+        val configuredFillPercent = profile.resolvedRenderedReceiptFillPercent(settings.systemPrintContentFillPercent)
+        val captureTarget = renderedImageMeta?.getOptionalString("capture_target").orEmpty()
+        val receiptContentCapture =
+            renderedImageMeta?.getOptionalBoolean("receipt_content_capture") == true ||
+                captureTarget.equals("pos-receipt", ignoreCase = true)
+        val effectiveFillPercent = when {
+            receiptContentCapture && configuredFillPercent == DEFAULT_SYSTEM_PRINT_CONTENT_FILL_PERCENT -> {
+                DEFAULT_EXACT_LAYOUT_RENDERED_RECEIPT_FILL_PERCENT
+            }
+            else -> configuredFillPercent
+        }
+        return ((maxWidth * (effectiveFillPercent / 100f)).roundToInt()).coerceIn(1, maxWidth)
+    }
+
+    private fun resolveRenderedReceiptSmartFit(
+        profile: PrinterProfile,
+        renderedImageMeta: JsonObject?
+    ): Boolean {
+        if (renderedImageMeta == null) {
+            return profile.resolvedRenderedReceiptSmartFit()
+        }
+
+        val receiptContentCapture = renderedImageMeta.getOptionalBoolean("receipt_content_capture")
+        val captureTarget = renderedImageMeta.getOptionalString("capture_target").orEmpty()
+        return when {
+            receiptContentCapture -> profile.resolvedRenderedReceiptSmartFit()
+            captureTarget.equals("pos-receipt", ignoreCase = true) -> profile.resolvedRenderedReceiptSmartFit()
+            else -> profile.resolvedRenderedReceiptSmartFit()
+        }
     }
 
     private fun appendStructuredOdooReceipt(
@@ -883,17 +990,20 @@ class PrinterDriver(
         val structuredReceipt = content.structuredReceipt
         if (structuredReceipt == null) {
             if (!content.image.isNullOrBlank()) {
-                appendRenderedReceiptImage(builder, content.image, profile, settings)
+                appendRenderedReceiptImage(
+                    builder = builder,
+                    imageBase64 = content.image,
+                    profile = profile,
+                    settings = settings,
+                    renderedImageMeta = content.renderedImageMeta
+                )
                 return
             }
             throw IllegalArgumentException("Structured Odoo receipt data is missing")
         }
 
         val structuredBlocks = buildStructuredOdooBlocks(structuredReceipt, profile)
-        val rasterBands = runCatching {
-            renderReceiptBlocksToBands(structuredBlocks, profile)
-        }.getOrDefault(emptyList())
-
+        val rasterBands = renderReceiptBlocksToBands(structuredBlocks, profile)
         if (rasterBands.isNotEmpty()) {
             builder.align("center")
             rasterBands.forEach { image ->
@@ -913,15 +1023,28 @@ class PrinterDriver(
         profile: PrinterProfile
     ): List<PrintBlock> {
         val blocks = mutableListOf<PrintBlock>()
+        val compactUsbLayout = usesCompactUsbReceiptLayout(profile)
         val logoImage = structuredReceipt.getOptionalString("logo_image")
         val qrImage = structuredReceipt.getOptionalString("qr_image")
+        val qrValue = structuredReceipt.getOptionalString("qr_value")
+        val barcodeImage = structuredReceipt.getOptionalString("barcode_image")
+        val barcodeValue = structuredReceipt.getOptionalString("barcode_value")
         val companyName = structuredReceipt.getOptionalString("company_name").orEmpty()
-        val orderName = structuredReceipt.getOptionalString("order_name").orEmpty()
         val date = structuredReceipt.getOptionalString("date").orEmpty()
         val cashier = structuredReceipt.getOptionalString("cashier").orEmpty()
+        val documentTitle = structuredReceipt.getOptionalString("document_title").orEmpty()
         val signatureLabel = structuredReceipt.getOptionalString("signature_label").orEmpty()
-        val logoWidth = ((profile.resolvedPrintAreaDots() * 0.46f).roundToInt()).coerceAtLeast(140)
-        val qrWidth = ((profile.resolvedPrintAreaDots() * 0.34f).roundToInt()).coerceAtLeast(128)
+        val logoWidth = (
+            profile.resolvedPrintAreaDots() * if (compactUsbLayout) 0.31f else 0.46f
+            ).roundToInt().coerceAtLeast(if (compactUsbLayout) 96 else 140)
+        val qrWidth = (
+            profile.resolvedPrintAreaDots() * if (compactUsbLayout) 0.34f else 0.40f
+            ).roundToInt().coerceAtLeast(if (compactUsbLayout) 140 else 176)
+            .coerceAtMost(profile.resolvedPrintAreaDots())
+        val barcodeWidth = (
+            profile.resolvedPrintAreaDots() * if (compactUsbLayout) 0.76f else 0.82f
+            ).roundToInt().coerceAtLeast(if (compactUsbLayout) 260 else 360)
+            .coerceAtMost(profile.resolvedPrintAreaDots())
         val supplementalLines = structuredReceipt.getOptionalArray("footer_lines")
             ?.let { footerLines ->
                 buildList<String> {
@@ -934,12 +1057,38 @@ class PrinterDriver(
                 }
             }
             .orEmpty()
-        val companyDetailLines = supplementalLines.filter { looksLikeCompanyDetailLine(it, companyName) }
-        val noticeLines = supplementalLines.filterNot { line ->
-            companyDetailLines.any { detail -> detail.equals(line, ignoreCase = true) }
+        val footerSections = extractStructuredReceiptFooterSections(supplementalLines)
+        val footerNoticeLines = footerSections.footerLines
+        val summaryRows = buildList {
+            structuredReceipt.getOptionalArray("summary")?.forEachJsonObject { row ->
+                val label = row.getOptionalString("label").orEmpty().normalizeReceiptPrinterText().trim()
+                val amount = row.getOptionalString("amount").orEmpty().normalizeReceiptPrinterText().trim()
+                val rightLabel = row.getOptionalString("right_label").orEmpty().normalizeReceiptPrinterText().trim()
+                val rightAmount = row.getOptionalString("right_amount").orEmpty().normalizeReceiptPrinterText().trim()
+                if (label.isNotBlank() && amount.isNotBlank()) {
+                    add(
+                        StructuredReceiptSummaryRow(
+                            label = label,
+                            amount = amount,
+                            emphasis = row.getOptionalBoolean("emphasis"),
+                            rightLabel = rightLabel,
+                            rightAmount = rightAmount,
+                            role = row.getOptionalString("role").orEmpty().normalizeReceiptPrinterText().trim()
+                        )
+                    )
+                }
+            }
+        }.toMutableList().apply {
+            footerSections.summaryRows.forEach { row ->
+                if (none { existing ->
+                        existing.label.equals(row.label, ignoreCase = true) &&
+                            existing.amount.equals(row.amount, ignoreCase = true)
+                    }
+                ) {
+                    add(row)
+                }
+            }
         }
-        val headerNotice = noticeLines.firstOrNull()
-        val footerNoticeLines = noticeLines.drop(1)
 
         blocks += printBlock("align", "center")
         if (!logoImage.isNullOrBlank()) {
@@ -948,29 +1097,20 @@ class PrinterDriver(
         if (companyName.isNotBlank()) {
             blocks += printBlock("text", companyName)
         }
-        headerNotice?.takeIf { it.isNotBlank() }?.let { blocks += printBlock("text", it) }
-        companyDetailLines
-            .filterNot { detail -> companyName.isNotBlank() && detail.equals(companyName, ignoreCase = true) }
-            .forEach { detail ->
-                blocks += printBlock("text", detail)
-            }
-        if (
-            !logoImage.isNullOrBlank() ||
-            companyName.isNotBlank() ||
-            !headerNotice.isNullOrBlank() ||
-            companyDetailLines.isNotEmpty()
-        ) {
+        if (!logoImage.isNullOrBlank() || companyName.isNotBlank()) {
             blocks += printBlock("feed", 1)
         }
 
-        if (orderName.isNotBlank()) {
-            blocks += printBlock("text", orderName)
-        }
         if (date.isNotBlank()) {
             blocks += printBlock("text", date)
         }
         if (cashier.isNotBlank()) {
             blocks += printBlock("text", cashier)
+        }
+        if (documentTitle.isNotBlank()) {
+            blocks += printBlock("feed", 1)
+            blocks += printBlock("align", "center")
+            blocks += printBlock("subtitle", documentTitle)
         }
 
         val lines = structuredReceipt.getOptionalArray("lines")
@@ -981,36 +1121,56 @@ class PrinterDriver(
                 val qty = line.getOptionalString("qty").orEmpty()
                 val name = line.getOptionalString("name").orEmpty()
                 val amount = line.getOptionalString("amount").orEmpty()
-                val primary = listOf(qty, name).filter { it.isNotBlank() }.joinToString("  ").trim()
-                if (primary.isNotBlank() || amount.isNotBlank()) {
-                    blocks += printBlock("row2", null, left = primary, right = amount)
+                if (qty.isNotBlank() || name.isNotBlank() || amount.isNotBlank()) {
+                    blocks += printBlock("itemrow", name, left = qty, right = amount)
                 }
 
                 line.getOptionalString("subline")
                     ?.takeIf { it.isNotBlank() }
                     ?.let { blocks += printBlock("text", "  $it") }
+                line.getOptionalArray("details")?.forEachJsonString { detail ->
+                    val normalizedDetail = detail.normalizeReceiptPrinterText().trim()
+                    if (normalizedDetail.isNotBlank()) {
+                        blocks += printBlock("text", "   - $normalizedDetail")
+                    }
+                }
                 line.getOptionalString("note")
                     ?.takeIf { it.isNotBlank() }
-                    ?.let { blocks += printBlock("text", "  Note: $it") }
+                    ?.let { blocks += printBlock("text", "   - Note: $it") }
             }
         }
 
-        val summary = structuredReceipt.getOptionalArray("summary")
-        if (summary?.size() ?: 0 > 0) {
+        if (summaryRows.isNotEmpty()) {
             blocks += printBlock("feed", 1)
-            summary?.forEachJsonObject { row ->
-                val label = row.getOptionalString("label").orEmpty()
-                val amount = row.getOptionalString("amount").orEmpty()
-                val emphasis = row.getOptionalBoolean("emphasis")
-                val renderedLabel = if (emphasis) label.uppercase(Locale.US) else label
-                blocks += printBlock("row2", null, left = renderedLabel, right = amount)
+            summaryRows.forEach { row ->
+                val leftText = listOf(row.label, row.amount)
+                    .filter { it.isNotBlank() }
+                    .joinToString(": ")
+                val rightText = listOf(row.rightLabel, row.rightAmount)
+                    .filter { it.isNotBlank() }
+                    .joinToString(": ")
+                blocks += printBlock("row2", null, left = leftText, right = rightText)
             }
         }
 
-        if (!qrImage.isNullOrBlank()) {
+        if (!qrValue.isNullOrBlank()) {
+            blocks += printBlock("feed", 1)
+            blocks += printBlock("align", "center")
+            blocks += printBlock("qr", qrValue, left = qrWidth.toString())
+        } else if (!qrImage.isNullOrBlank()) {
             blocks += printBlock("feed", 1)
             blocks += printBlock("align", "center")
             blocks += printBlock("image", qrImage, left = qrWidth.toString())
+        }
+
+        if (!barcodeImage.isNullOrBlank()) {
+            blocks += printBlock("feed", 1)
+            blocks += printBlock("align", "center")
+            blocks += printBlock("image", barcodeImage, left = barcodeWidth.toString())
+        } else if (!barcodeValue.isNullOrBlank()) {
+            blocks += printBlock("feed", 1)
+            blocks += printBlock("align", "center")
+            blocks += printBlock("text", barcodeValue)
         }
 
         if (footerNoticeLines.isNotEmpty()) {
@@ -1024,13 +1184,191 @@ class PrinterDriver(
         }
 
         if (signatureLabel.isNotBlank()) {
-            blocks += printBlock("feed", 3)
+            blocks += printBlock("feed", if (compactUsbLayout) 2 else 3)
             blocks += printBlock("align", "center")
             blocks += printBlock("text", signatureLabel)
         }
 
         blocks += printBlock("align", "left")
         return blocks
+    }
+
+    private fun extractStructuredReceiptFooterSections(
+        supplementalLines: List<String>
+    ): StructuredReceiptFooterSections {
+        if (supplementalLines.isEmpty()) {
+            return StructuredReceiptFooterSections(
+                summaryRows = emptyList(),
+                footerLines = emptyList()
+            )
+        }
+
+        val summaryRows = mutableListOf<StructuredReceiptSummaryRow>()
+        var lastTotalAmount = ""
+        var index = 0
+
+        while (index < supplementalLines.size) {
+            val line = supplementalLines[index].normalizeReceiptPrinterText().trim()
+            if (line.isBlank()) {
+                index += 1
+                continue
+            }
+
+            val nextLine = supplementalLines
+                .getOrNull(index + 1)
+                ?.normalizeReceiptPrinterText()
+                ?.trim()
+                .orEmpty()
+
+            if (
+                summaryRows.none { it.label.equals("Subtotal", ignoreCase = true) } &&
+                looksLikeStructuredAmountOnlyLine(line) &&
+                (nextLine.isBlank() || looksLikeStructuredSummaryLabel(nextLine) || looksLikeStructuredFooterBoundary(nextLine))
+            ) {
+                val amount = extractStructuredTrailingAmount(line)
+                if (amount.isNotBlank()) {
+                    summaryRows += StructuredReceiptSummaryRow(
+                        label = "Subtotal",
+                        amount = amount,
+                        emphasis = false
+                    )
+                    index += 1
+                    continue
+                }
+            }
+
+            val parsedInlineRow = parseStructuredSummaryRow(line)
+            if (parsedInlineRow != null) {
+                summaryRows += parsedInlineRow
+                if (parsedInlineRow.emphasis || parsedInlineRow.label.equals("Total", ignoreCase = true)) {
+                    lastTotalAmount = parsedInlineRow.amount
+                }
+                index += 1
+                continue
+            }
+
+            if (looksLikeStructuredSummaryLabel(line)) {
+                val amountFromNextLine = if (looksLikeStructuredAmountOnlyLine(nextLine)) {
+                    extractStructuredTrailingAmount(nextLine)
+                } else {
+                    ""
+                }
+                val fallbackAmount = if (
+                    amountFromNextLine.isBlank() &&
+                    looksLikeStructuredPaymentLabel(line) &&
+                    lastTotalAmount.isNotBlank()
+                ) {
+                    lastTotalAmount
+                } else {
+                    amountFromNextLine
+                }
+
+                if (fallbackAmount.isNotBlank()) {
+                    val normalizedLabel = line.normalizeReceiptPrinterText().trim().trimEnd(':').trim()
+                    summaryRows += StructuredReceiptSummaryRow(
+                        label = normalizedLabel,
+                        amount = fallbackAmount,
+                        emphasis = normalizedLabel.equals("Total", ignoreCase = true)
+                    )
+                    if (normalizedLabel.equals("Total", ignoreCase = true)) {
+                        lastTotalAmount = fallbackAmount
+                    }
+                    index += if (amountFromNextLine.isNotBlank()) 2 else 1
+                    continue
+                }
+            }
+
+            break
+        }
+
+        return StructuredReceiptFooterSections(
+            summaryRows = summaryRows,
+            footerLines = supplementalLines.drop(index)
+        )
+    }
+
+    private fun parseStructuredSummaryRow(line: String): StructuredReceiptSummaryRow? {
+        val normalizedLine = line.normalizeReceiptPrinterText().trim()
+        if (normalizedLine.isBlank() || !looksLikeStructuredSummaryLabel(normalizedLine)) {
+            return null
+        }
+
+        val amount = extractStructuredTrailingAmount(normalizedLine)
+        if (amount.isBlank()) {
+            return null
+        }
+
+        val label = normalizedLine
+            .substring(0, normalizedLine.length - amount.length)
+            .trim()
+            .trimEnd(':')
+            .trim()
+        if (label.isBlank()) {
+            return null
+        }
+
+        return StructuredReceiptSummaryRow(
+            label = label,
+            amount = amount,
+            emphasis = label.equals("Total", ignoreCase = true)
+        )
+    }
+
+    private fun extractStructuredTrailingAmount(line: String): String {
+        val normalizedLine = line.normalizeReceiptPrinterText().trim()
+        if (normalizedLine.isBlank()) {
+            return ""
+        }
+
+        val match = Regex("\\$?\\s*-?\\d[\\d,]*(?:\\.\\d{1,2})?\\s*\\$?\\s*$")
+            .find(normalizedLine)
+            ?: return ""
+        return match.value.trim()
+    }
+
+    private fun looksLikeStructuredAmountOnlyLine(line: String): Boolean {
+        val normalizedLine = line.normalizeReceiptPrinterText().trim()
+        if (normalizedLine.isBlank()) {
+            return false
+        }
+        val amount = extractStructuredTrailingAmount(normalizedLine)
+        return amount.isNotBlank() && normalizedLine == amount
+    }
+
+    private fun looksLikeStructuredSummaryLabel(line: String): Boolean {
+        val normalizedLine = line.normalizeReceiptPrinterText().trim()
+        if (normalizedLine.isBlank()) {
+            return false
+        }
+        return Regex(
+            "^(subtotal|total|tax\\b|vat\\b|gst\\b|gct\\b|change\\b|rounding\\b|discounts?\\b|cash\\b|card\\b|visa\\b|master\\s*card\\b|mastercard\\b|amex\\b|debit\\b|credit\\b|payment\\b|tender\\b|balance\\b|tip\\b|service\\b|ja\\s+tax\\b)",
+            RegexOption.IGNORE_CASE
+        ).containsMatchIn(normalizedLine)
+    }
+
+    private fun looksLikeStructuredPaymentLabel(line: String): Boolean {
+        val normalizedLine = line.normalizeReceiptPrinterText().trim()
+        if (normalizedLine.isBlank()) {
+            return false
+        }
+        return Regex(
+            "^(cash\\b|card\\b|visa\\b|master\\s*card\\b|mastercard\\b|amex\\b|debit\\b|credit\\b|payment\\b|tender\\b|balance\\b)",
+            RegexOption.IGNORE_CASE
+        ).containsMatchIn(normalizedLine)
+    }
+
+    private fun looksLikeStructuredFooterBoundary(line: String): Boolean {
+        val normalizedLine = line.normalizeReceiptPrinterText().trim()
+        if (normalizedLine.isBlank()) {
+            return false
+        }
+        if (
+            Regex("^(bus|table|guest|gct|tel|phone|powered by|email|website)\\b", RegexOption.IGNORE_CASE)
+                .containsMatchIn(normalizedLine)
+        ) {
+            return true
+        }
+        return normalizedLine.contains(',') || Regex("\\(\\d{3}\\)").containsMatchIn(normalizedLine)
     }
 
     private fun printBlock(
@@ -1148,6 +1486,78 @@ class PrinterDriver(
         return wrappedLines.ifEmpty { listOf("") }
     }
 
+    private fun appendEscPosTwoColumnRow(
+        builder: EscPosBuilder,
+        left: String,
+        right: String,
+        charactersPerLine: Int
+    ) {
+        val width = charactersPerLine.coerceAtLeast(24)
+        val normalizedLeft = left.normalizeReceiptPrinterText().trim()
+        val normalizedRight = right.normalizeReceiptPrinterText().trim()
+        if (normalizedRight.isBlank()) {
+            wrapReceiptLine(normalizedLeft, width).forEach { line ->
+                builder.text(line).newLine()
+            }
+            return
+        }
+
+        val leftWidth = (width - normalizedRight.length - 1).coerceAtLeast(width / 2)
+        val leftLines = wrapReceiptLine(normalizedLeft, leftWidth)
+        builder.text(formatEscPosTwoColumnLine(leftLines.firstOrNull().orEmpty(), normalizedRight, width)).newLine()
+        leftLines.drop(1).forEach { line ->
+            builder.text(line).newLine()
+        }
+    }
+
+    private fun appendEscPosItemRow(
+        builder: EscPosBuilder,
+        qty: String,
+        name: String,
+        amount: String,
+        charactersPerLine: Int
+    ) {
+        val width = charactersPerLine.coerceAtLeast(24)
+        val qtyText = qty.normalizeReceiptPrinterText().trim()
+        val nameText = name.normalizeReceiptPrinterText().trim()
+        val amountText = amount.normalizeReceiptPrinterText().trim()
+        val qtyWidth = if (qtyText.isBlank()) 0 else maxOf(2, qtyText.length)
+        val qtyGap = if (qtyText.isBlank()) 0 else 2
+        val amountGap = if (amountText.isBlank()) 0 else 1
+        val nameWidth = (width - qtyWidth - qtyGap - amountText.length - amountGap).coerceAtLeast(8)
+        val nameLines = wrapReceiptLine(nameText, nameWidth)
+        val firstName = nameLines.firstOrNull().orEmpty()
+        val firstLeft = buildString {
+            if (qtyWidth > 0) {
+                append(qtyText.padEnd(qtyWidth))
+                append(" ".repeat(qtyGap))
+            }
+            append(firstName)
+        }
+
+        builder.text(formatEscPosTwoColumnLine(firstLeft, amountText, width)).newLine()
+
+        val continuationPrefix = " ".repeat(qtyWidth + qtyGap)
+        nameLines.drop(1).forEach { line ->
+            builder.text((continuationPrefix + line).trimEnd()).newLine()
+        }
+    }
+
+    private fun formatEscPosTwoColumnLine(left: String, right: String, charactersPerLine: Int): String {
+        val normalizedLeft = left.normalizeReceiptPrinterText().trimEnd()
+        val normalizedRight = right.normalizeReceiptPrinterText().trim()
+        if (normalizedRight.isBlank()) {
+            return normalizedLeft
+        }
+
+        val total = normalizedLeft.length + normalizedRight.length
+        return if (total >= charactersPerLine) {
+            "$normalizedLeft $normalizedRight".trim()
+        } else {
+            normalizedLeft + " ".repeat(charactersPerLine - total) + normalizedRight
+        }
+    }
+
     private fun extractReceiptTextFromHtml(html: String): String {
         if (html.isBlank()) {
             return ""
@@ -1239,6 +1649,9 @@ class PrinterDriver(
             "text" -> {
                 builder.text(block.value?.toString().orEmpty()).newLine()
             }
+            "title", "subtitle" -> {
+                builder.text(block.value?.toString().orEmpty()).newLine()
+            }
             "align" -> {
                 builder.align(block.value?.toString().orEmpty())
             }
@@ -1259,13 +1672,13 @@ class PrinterDriver(
             "row2" -> {
                 val left = block.left.orEmpty()
                 val right = block.right.orEmpty()
-                val total = left.length + right.length
-                val width = profile.charactersPerLine
-                if (total >= width) {
-                    builder.text("$left $right").newLine()
-                } else {
-                    builder.text(left + " ".repeat(width - total) + right).newLine()
-                }
+                appendEscPosTwoColumnRow(builder, left, right, profile.charactersPerLine)
+            }
+            "itemrow" -> {
+                val qty = block.left.orEmpty()
+                val name = block.value?.toString().orEmpty()
+                val amount = block.right.orEmpty()
+                appendEscPosItemRow(builder, qty, name, amount, profile.charactersPerLine)
             }
             "qr" -> {
                 val value = block.value?.toString().orEmpty()
@@ -1330,19 +1743,27 @@ class PrinterDriver(
             return emptyList()
         }
 
+        val compactUsbLayout = usesCompactUsbReceiptLayout(profile)
         val targetWidth = profile.resolvedPrintAreaDots().coerceAtLeast(320)
-        val sidePadding = (targetWidth * 0.055f)
+        val sidePadding = (targetWidth * if (compactUsbLayout) 0.052f else 0.040f)
             .roundToInt()
-            .coerceIn(12, maxOf(12, targetWidth / 5))
+            .coerceIn(
+                if (compactUsbLayout) 14 else 12,
+                maxOf(if (compactUsbLayout) 14 else 12, targetWidth / if (compactUsbLayout) 4 else 5)
+            )
         val contentWidth = (targetWidth - (sidePadding * 2))
-            .coerceAtLeast((targetWidth * 0.72f).roundToInt())
+            .coerceAtLeast((targetWidth * if (compactUsbLayout) 0.68f else 0.72f).roundToInt())
 
         val measureCanvas = BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB)
         val measureGraphics = measureCanvas.createGraphics()
 
         try {
             applyReceiptRasterHints(measureGraphics)
-            val layout = createReceiptRasterLayout(measureGraphics, targetWidth)
+            val layout = createReceiptRasterLayout(
+                measureGraphics = measureGraphics,
+                targetWidth = targetWidth,
+                compactUsbLayout = compactUsbLayout
+            )
             val elements = mutableListOf<ReceiptRasterElement>()
             var currentAlign = ReceiptRasterAlign.LEFT
 
@@ -1350,6 +1771,28 @@ class PrinterDriver(
                 when (block.cmd.lowercase(Locale.US)) {
                     "align" -> {
                         currentAlign = parseReceiptRasterAlign(block.value?.toString())
+                    }
+                    "title" -> {
+                        appendReceiptRasterTextElement(
+                            destination = elements,
+                            text = block.value?.toString().orEmpty(),
+                            align = currentAlign,
+                            font = layout.titleFont,
+                            lineHeight = layout.titleLineHeight,
+                            maxWidth = contentWidth,
+                            measureGraphics = measureGraphics
+                        )
+                    }
+                    "subtitle" -> {
+                        appendReceiptRasterTextElement(
+                            destination = elements,
+                            text = block.value?.toString().orEmpty(),
+                            align = currentAlign,
+                            font = layout.footerFont,
+                            lineHeight = layout.footerLineHeight,
+                            maxWidth = contentWidth,
+                            measureGraphics = measureGraphics
+                        )
                     }
                     "text" -> {
                         val text = block.value?.toString().orEmpty()
@@ -1382,6 +1825,56 @@ class PrinterDriver(
                             rightFont = layout.amountFont,
                             leftLineHeight = layout.bodyLineHeight,
                             rightLineHeight = layout.amountLineHeight
+                        )
+                    }
+                    "itemrow" -> {
+                        val qtyText = block.left.orEmpty()
+                        val nameText = block.value?.toString().orEmpty()
+                        val rightText = block.right.orEmpty()
+                        val rightWidth = measureTextWidth(measureGraphics, layout.amountFont, rightText)
+                        val qtyWidth = if (qtyText.isBlank()) {
+                            0
+                        } else {
+                            maxOf(
+                                measureTextWidth(measureGraphics, layout.bodyFont, qtyText),
+                                (contentWidth * 0.08f).roundToInt()
+                            )
+                        }
+                        val qtyGap = if (qtyText.isBlank()) {
+                            0
+                        } else {
+                            (layout.rowGap * 0.65f).roundToInt().coerceAtLeast(6)
+                        }
+                        val amountGap = if (rightText.isBlank()) 0 else layout.rowGap
+                        val maximumNameWidth = (contentWidth - qtyWidth - qtyGap - amountGap)
+                            .coerceAtLeast(1)
+                        val minimumNameWidth = minOf(
+                            maximumNameWidth,
+                            (contentWidth * 0.30f).roundToInt().coerceAtLeast(1)
+                        )
+                        val nameWidth = (
+                            contentWidth - qtyWidth - qtyGap - rightWidth - amountGap
+                            )
+                            .coerceAtLeast(minimumNameWidth)
+                            .coerceAtMost(maximumNameWidth)
+                        val nameLines = wrapReceiptTextByWidth(
+                            text = nameText,
+                            font = layout.bodyFont,
+                            maxWidth = nameWidth,
+                            measureGraphics = measureGraphics
+                        )
+                        elements += ReceiptRasterElement.ItemRow(
+                            qty = qtyText,
+                            nameLines = nameLines,
+                            right = rightText,
+                            qtyFont = layout.bodyFont,
+                            nameFont = layout.bodyFont,
+                            rightFont = layout.amountFont,
+                            qtyLineHeight = layout.bodyLineHeight,
+                            nameLineHeight = layout.bodyLineHeight,
+                            rightLineHeight = layout.amountLineHeight,
+                            qtyWidth = qtyWidth,
+                            qtyGap = qtyGap
                         )
                     }
                     "feed" -> {
@@ -1467,20 +1960,27 @@ class PrinterDriver(
 
     private fun createReceiptRasterLayout(
         measureGraphics: Graphics2D,
-        targetWidth: Int
+        targetWidth: Int,
+        compactUsbLayout: Boolean
     ): ReceiptRasterLayout {
         val scale = targetWidth / 576f
 
         fun receiptFont(pointSize: Float, bold: Boolean): Font {
-            val scaledSize = (pointSize * scale).coerceAtLeast(14f).roundToInt()
+            val minimumPointSize = if (compactUsbLayout) 10f else 12f
+            val scaledSize = (pointSize * scale).coerceAtLeast(minimumPointSize).roundToInt()
             return Font("SansSerif", if (bold) Font.BOLD else Font.PLAIN, scaledSize)
         }
 
-        val titleFont = receiptFont(pointSize = 34f, bold = true)
-        val bodyFont = receiptFont(pointSize = 25f, bold = true)
-        val amountFont = receiptFont(pointSize = 27f, bold = true)
-        val footerFont = receiptFont(pointSize = 22f, bold = true)
-        val smallFont = receiptFont(pointSize = 22f, bold = false)
+        val titleFont = receiptFont(pointSize = if (compactUsbLayout) 19f else 24f, bold = true)
+        val bodyFont = receiptFont(pointSize = if (compactUsbLayout) 15f else 20f, bold = true)
+        val amountFont = receiptFont(pointSize = if (compactUsbLayout) 15f else 20f, bold = true)
+        val footerFont = receiptFont(pointSize = if (compactUsbLayout) 12f else 16f, bold = true)
+        val smallFont = receiptFont(pointSize = if (compactUsbLayout) 10.5f else 13f, bold = false)
+        val titleLineMultiplier = if (compactUsbLayout) 1.0f else 1.04f
+        val bodyLineMultiplier = if (compactUsbLayout) 1.01f else 1.04f
+        val amountLineMultiplier = if (compactUsbLayout) 1.01f else 1.04f
+        val footerLineMultiplier = if (compactUsbLayout) 1.0f else 1.03f
+        val smallLineMultiplier = if (compactUsbLayout) 1.0f else 1.02f
 
         return ReceiptRasterLayout(
             titleFont = titleFont,
@@ -1488,17 +1988,25 @@ class PrinterDriver(
             amountFont = amountFont,
             footerFont = footerFont,
             smallFont = smallFont,
-            titleLineHeight = calculateReceiptRasterLineHeight(measureGraphics, titleFont, 1.12f),
-            bodyLineHeight = calculateReceiptRasterLineHeight(measureGraphics, bodyFont, 1.16f),
-            amountLineHeight = calculateReceiptRasterLineHeight(measureGraphics, amountFont, 1.16f),
-            footerLineHeight = calculateReceiptRasterLineHeight(measureGraphics, footerFont, 1.14f),
-            smallLineHeight = calculateReceiptRasterLineHeight(measureGraphics, smallFont, 1.14f),
-            blockSpacing = (16f * scale).roundToInt().coerceAtLeast(12),
-            imageSpacing = (24f * scale).roundToInt().coerceAtLeast(18),
-            rowGap = (22f * scale).roundToInt().coerceAtLeast(14),
-            topPadding = (22f * scale).roundToInt().coerceAtLeast(16),
-            bottomPadding = (28f * scale).roundToInt().coerceAtLeast(18)
+            titleLineHeight = calculateReceiptRasterLineHeight(measureGraphics, titleFont, titleLineMultiplier),
+            bodyLineHeight = calculateReceiptRasterLineHeight(measureGraphics, bodyFont, bodyLineMultiplier),
+            amountLineHeight = calculateReceiptRasterLineHeight(measureGraphics, amountFont, amountLineMultiplier),
+            footerLineHeight = calculateReceiptRasterLineHeight(measureGraphics, footerFont, footerLineMultiplier),
+            smallLineHeight = calculateReceiptRasterLineHeight(measureGraphics, smallFont, smallLineMultiplier),
+            blockSpacing = ((if (compactUsbLayout) 4f else 6f) * scale).roundToInt().coerceAtLeast(if (compactUsbLayout) 3 else 5),
+            imageSpacing = ((if (compactUsbLayout) 10f else 16f) * scale).roundToInt().coerceAtLeast(if (compactUsbLayout) 8 else 12),
+            rowGap = ((if (compactUsbLayout) 7f else 10f) * scale).roundToInt().coerceAtLeast(if (compactUsbLayout) 5 else 8),
+            topPadding = ((if (compactUsbLayout) 7f else 10f) * scale).roundToInt().coerceAtLeast(if (compactUsbLayout) 5 else 8),
+            bottomPadding = ((if (compactUsbLayout) 8f else 12f) * scale).roundToInt().coerceAtLeast(if (compactUsbLayout) 6 else 10)
         )
+    }
+
+    private fun usesCompactUsbReceiptLayout(profile: PrinterProfile): Boolean {
+        return profile.connectionType == ConnectionType.USB &&
+            (
+                profile.paperWidthMm <= 58 ||
+                    profile.resolvedPrintAreaDots() <= 384
+                )
     }
 
     private fun calculateReceiptRasterLineHeight(
@@ -1681,17 +2189,20 @@ class PrinterDriver(
         val targetWidth = (requestedWidth ?: maxWidth).coerceIn(1, maxWidth)
         val targetHeight = requestedHeight?.coerceAtLeast(1)
             ?: ((sourceImage.height * (targetWidth.toFloat() / sourceImage.width.toFloat())).roundToInt()).coerceAtLeast(1)
+        val sourceRatio = sourceImage.width.toFloat() / sourceImage.height.toFloat().coerceAtLeast(1f)
+        val looksLikeBarcodeOrQr = sourceRatio in 0.72f..1.28f || sourceRatio >= 1.8f
 
         val scaledImage = BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB)
         val graphics = scaledImage.createGraphics()
         try {
-            applyReceiptRasterHints(graphics)
-            graphics.drawImage(
-                sourceImage.getScaledInstance(targetWidth, targetHeight, Image.SCALE_SMOOTH),
-                0,
-                0,
-                null
-            )
+            if (looksLikeBarcodeOrQr) {
+                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
+                graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF)
+                graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED)
+            } else {
+                applyReceiptRasterHints(graphics)
+            }
+            graphics.drawImage(sourceImage, 0, 0, targetWidth, targetHeight, null)
         } finally {
             graphics.dispose()
         }
@@ -1741,10 +2252,10 @@ class PrinterDriver(
     }
 
     private fun applyReceiptRasterHints(graphics: Graphics2D) {
-        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF)
         graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
-        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC)
-        graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
+        graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF)
     }
 
     private fun measureReceiptRasterElementHeight(
@@ -1755,6 +2266,13 @@ class PrinterDriver(
             is ReceiptRasterElement.Text -> (element.lines.size * element.lineHeight) + layout.blockSpacing
             is ReceiptRasterElement.Row -> {
                 maxOf(element.leftLines.size * element.leftLineHeight, element.rightLineHeight) + layout.blockSpacing
+            }
+            is ReceiptRasterElement.ItemRow -> {
+                maxOf(
+                    element.nameLines.size * element.nameLineHeight,
+                    element.qtyLineHeight,
+                    element.rightLineHeight
+                ) + layout.blockSpacing
             }
             is ReceiptRasterElement.Image -> element.image.height + layout.imageSpacing
             is ReceiptRasterElement.Spacer -> element.height
@@ -1794,18 +2312,49 @@ class PrinterDriver(
                     graphics.font = element.leftFont
                     graphics.color = Color.BLACK
                     val bodyMetrics = graphics.getFontMetrics(element.leftFont)
-                    val baselineY = nextY - bodyMetrics.ascent
+                    val baselineY = nextY + bodyMetrics.ascent
                     graphics.drawString(line, sidePadding.toFloat(), baselineY)
 
                     if (index == 0 && element.right.isNotBlank()) {
                         graphics.font = element.rightFont
                         val rightMetrics = graphics.getFontMetrics(element.rightFont)
                         val rightX = (pageWidth - sidePadding - rightMetrics.stringWidth(element.right)).toFloat()
-                        graphics.drawString(element.right, rightX, baselineY)
+                        val rightBaselineY = nextY + rightMetrics.ascent
+                        graphics.drawString(element.right, rightX, rightBaselineY)
                     }
                     nextY += element.leftLineHeight
                 }
                 maxOf((currentY + element.rightLineHeight).toFloat(), nextY).roundToInt() + layout.blockSpacing
+            }
+            is ReceiptRasterElement.ItemRow -> {
+                var nextY = currentY.toFloat()
+                val qtyX = sidePadding.toFloat()
+                val nameX = (sidePadding + element.qtyWidth + element.qtyGap).toFloat()
+
+                if (element.qty.isNotBlank()) {
+                    graphics.font = element.qtyFont
+                    graphics.color = Color.BLACK
+                    val qtyMetrics = graphics.getFontMetrics(element.qtyFont)
+                    graphics.drawString(element.qty, qtyX, nextY + qtyMetrics.ascent)
+                }
+
+                element.nameLines.forEachIndexed { index, line ->
+                    graphics.font = element.nameFont
+                    graphics.color = Color.BLACK
+                    val nameMetrics = graphics.getFontMetrics(element.nameFont)
+                    graphics.drawString(line, nameX, nextY + nameMetrics.ascent)
+
+                    if (index == 0 && element.right.isNotBlank()) {
+                        graphics.font = element.rightFont
+                        val rightMetrics = graphics.getFontMetrics(element.rightFont)
+                        val rightX = (pageWidth - sidePadding - rightMetrics.stringWidth(element.right)).toFloat()
+                        graphics.drawString(element.right, rightX, nextY + rightMetrics.ascent)
+                    }
+                    nextY += element.nameLineHeight
+                }
+
+                maxOf((currentY + element.qtyLineHeight).toFloat(), (currentY + element.rightLineHeight).toFloat(), nextY)
+                    .roundToInt() + layout.blockSpacing
             }
             is ReceiptRasterElement.Image -> {
                 val drawX = when (element.align) {
@@ -1835,7 +2384,7 @@ class PrinterDriver(
             ReceiptRasterAlign.CENTER -> ((pageWidth - metrics.stringWidth(text)) / 2).coerceAtLeast(0)
             ReceiptRasterAlign.RIGHT -> (pageWidth - sidePadding - metrics.stringWidth(text)).coerceAtLeast(0)
         }
-        val baselineY = lineTopY - metrics.ascent
+        val baselineY = lineTopY + metrics.ascent
         graphics.drawString(text, x.toFloat(), baselineY)
     }
 
@@ -1887,6 +2436,20 @@ class PrinterDriver(
             val rightLineHeight: Int
         ) : ReceiptRasterElement()
 
+        data class ItemRow(
+            val qty: String,
+            val nameLines: List<String>,
+            val right: String,
+            val qtyFont: Font,
+            val nameFont: Font,
+            val rightFont: Font,
+            val qtyLineHeight: Int,
+            val nameLineHeight: Int,
+            val rightLineHeight: Int,
+            val qtyWidth: Int,
+            val qtyGap: Int
+        ) : ReceiptRasterElement()
+
         data class Image(
             val image: BufferedImage,
             val align: ReceiptRasterAlign
@@ -1921,6 +2484,7 @@ class JobDispatcher(
     private val jobRepository: JobRepository,
     private val printerRepository: PrinterRepository,
     private val printerDriver: PrinterDriver,
+    private val bridgeEventLog: BridgeEventLog,
     private val scope: CoroutineScope
 ) {
     private val processingIds = ConcurrentHashMap.newKeySet<String>()
@@ -1961,10 +2525,26 @@ class JobDispatcher(
                 throw IllegalStateException("No printer profile found for job ${job.id}")
             }
 
+            val metadata = runCatching { PrintJobFactory.extractMetadata(job.payloadJson) }.getOrNull()
+            bridgeEventLog.record(
+                source = "printer",
+                level = BridgeEventLevel.INFO,
+                message = "Printer selected: ${profile.name} (${profile.connectionType}) for job ${job.id}; content type: ${metadata?.contentType ?: "unknown"}."
+            )
             printerDriver.print(job, profile)
             jobRepository.updateJobStatus(job, JobStatus.COMPLETED)
+            bridgeEventLog.record(
+                source = "printer",
+                level = BridgeEventLevel.INFO,
+                message = "Print job completed: ${job.id}."
+            )
         } catch (error: Exception) {
             jobRepository.updateJobStatus(job, JobStatus.FAILED, error.message ?: "Unknown error")
+            bridgeEventLog.record(
+                source = "printer",
+                level = BridgeEventLevel.ERROR,
+                message = "Print job failed: ${job.id}; error: ${error.message ?: "Unknown error"}"
+            )
         } finally {
             processingIds.remove(job.id)
         }
@@ -2036,6 +2616,11 @@ class PrintServer(
 
                             val allProfiles = printerRepository.allProfiles.value
                             val defaultProfile = allProfiles.firstOrNull { it.isDefault } ?: allProfiles.firstOrNull()
+                            bridgeEventLog.record(
+                                source = "odoo",
+                                level = BridgeEventLevel.INFO,
+                                message = "Integration status checked from ${call.describeIntegrationClient()}."
+                            )
                             call.respond(
                                 mapOf(
                                     "status" to "running",
@@ -2152,6 +2737,12 @@ class PrintServer(
 
                             val metadata = PrintJobFactory.extractMetadata(normalizedPayloadJson)
                             val job = PrintJobFactory.createFromPayloadJson(normalizedPayloadJson)
+                            val receiptLogSummary = describeOdooReceiptJobForLog(body, normalizedPayloadJson, metadata)
+                            bridgeEventLog.record(
+                                source = "odoo",
+                                level = BridgeEventLevel.INFO,
+                                message = "Print job received: $receiptLogSummary"
+                            )
                             val printerAvailabilityError = resolvePrinterAvailabilityError(job)
                             if (printerAvailabilityError != null) {
                                 bridgeEventLog.record(
@@ -2173,7 +2764,7 @@ class PrintServer(
                             bridgeEventLog.record(
                                 source = "odoo",
                                 level = BridgeEventLevel.INFO,
-                                message = "Queued ${metadata.contentType} receipt from ${call.describeIntegrationClient()}."
+                                message = "Queued ${metadata.contentType} receipt from ${call.describeIntegrationClient()}; job id: ${job.id}."
                             )
                             call.respond(
                                 mapOf(
@@ -2301,6 +2892,56 @@ class PrintServer(
         call.response.headers.append("Access-Control-Max-Age", "86400")
         call.response.headers.append("Access-Control-Allow-Private-Network", "true")
         return true
+    }
+
+    private fun describeOdooReceiptJobForLog(
+        rawPayloadJson: String,
+        normalizedPayloadJson: String,
+        metadata: PrintJobMetadata
+    ): String {
+        val rawRoot = parseJsonObjectForLog(rawPayloadJson)
+        val normalizedRoot = parseJsonObjectForLog(normalizedPayloadJson)
+        val content = normalizedRoot
+            ?.get("content")
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+        val structuredReceipt = content
+            ?.get("structured_receipt")
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+        val printType = rawRoot.readLogString("print_type")
+            ?: normalizedRoot.readLogString("print_type")
+            ?: "receipt"
+        val documentType = rawRoot.readLogString("document_type")
+            ?: normalizedRoot.readLogString("document_type")
+            ?: metadata.contentType
+        val orderName = rawRoot.readLogString("order_name")
+            ?: normalizedRoot.readLogString("order_name")
+            ?: ""
+        val qrBarcodeDetected =
+            !content.readLogString("image").isNullOrBlank() ||
+                !structuredReceipt.readLogString("qr_value").isNullOrBlank() ||
+                !structuredReceipt.readLogString("qr_image").isNullOrBlank() ||
+                !structuredReceipt.readLogString("barcode_value").isNullOrBlank() ||
+                !structuredReceipt.readLogString("barcode_image").isNullOrBlank()
+
+        return "type: $printType/$documentType; accepted as: ${metadata.contentType}; order: ${orderName.ifBlank { "n/a" }}; QR/barcode image detected: $qrBarcodeDetected."
+    }
+
+    private fun parseJsonObjectForLog(payloadJson: String): JsonObject? {
+        return runCatching {
+            JsonParser.parseString(payloadJson)
+                .takeIf { it.isJsonObject }
+                ?.asJsonObject
+        }.getOrNull()
+    }
+
+    private fun JsonObject?.readLogString(fieldName: String): String? {
+        val value = this?.get(fieldName) ?: return null
+        if (!value.isJsonPrimitive || !value.asJsonPrimitive.isString) {
+            return null
+        }
+        return value.asString.trim().ifBlank { null }
     }
 
     private suspend fun resolvePrinterAvailabilityError(job: PrintJob): String? {
@@ -2786,14 +3427,22 @@ class ReceiptBridgeDesktopController(
     private val jobRepository = JobRepository(storage)
     private val settingsRepository = SettingsRepository(storage)
     private val bridgeEventLog = BridgeEventLog()
-    private val printerDriver = PrinterDriver(settingsRepository)
-    private val jobDispatcher = JobDispatcher(jobRepository, printerRepository, printerDriver, scope)
+    private val printerDriver = PrinterDriver(settingsRepository, bridgeEventLog)
+    private val jobDispatcher = JobDispatcher(jobRepository, printerRepository, printerDriver, bridgeEventLog, scope)
     private val networkScanner = NetworkScanner()
     private val windowsPrinterQueueDiscovery = WindowsPrinterQueueDiscovery()
     private val windowsUsbPrinterProvisioner = WindowsUsbPrinterProvisioner()
     private val printServer = PrintServer(jobRepository, printerRepository, settingsRepository, bridgeEventLog, scope)
 
     val profiles = printerRepository.allProfiles
+    val activeProfile = printerRepository.allProfiles
+        .map { allProfiles -> allProfiles.firstOrNull { it.isDefault } ?: allProfiles.firstOrNull() }
+        .stateIn(
+            scope = scope,
+            started = SharingStarted.Eagerly,
+            initialValue = printerRepository.allProfiles.value.firstOrNull { it.isDefault }
+                ?: printerRepository.allProfiles.value.firstOrNull()
+        )
     val jobs = jobRepository.allJobs
     val settings = settingsRepository.settings
     val serverState = printServer.serverState
@@ -2959,6 +3608,7 @@ class ReceiptBridgeDesktopController(
                 } else {
                     requestedAddress
                 }
+                val defaultOdooRenderMode = defaultOdooReceiptRenderModeFor(type)
                 val profile = PrinterProfile(
                     name = name,
                     connectionType = type,
@@ -2966,7 +3616,11 @@ class ReceiptBridgeDesktopController(
                     paperWidthMm = normalizedPaperWidth,
                     printAreaDots = sanitizedDots,
                     charactersPerLine = defaultCharactersPerLineForPrintAreaDots(sanitizedDots),
-                    renderedReceiptFillPercent = settings.value.systemPrintContentFillPercent,
+                    odooReceiptRenderMode = defaultOdooRenderMode,
+                    renderedReceiptFillPercent = defaultRenderedReceiptFillPercentFor(
+                        renderMode = defaultOdooRenderMode,
+                        fallbackPercent = settings.value.systemPrintContentFillPercent
+                    ),
                     renderedReceiptSmartFit = true,
                     isDefault = isDefault
                 )
@@ -2998,8 +3652,12 @@ class ReceiptBridgeDesktopController(
 
     fun setDefault(profile: PrinterProfile) {
         scope.launch {
-            printerRepository.saveProfile(profile.copy(isDefault = true))
-            _printerActionMessage.value = "Default printer set to ${profile.name}"
+            val updatedProfile = printerRepository.setDefaultProfile(profile.id)
+            _printerActionMessage.value = if (updatedProfile != null) {
+                "Default printer set to ${updatedProfile.name}"
+            } else {
+                "Unable to set ${profile.name} as the default printer."
+            }
         }
     }
 
@@ -3076,6 +3734,25 @@ class ReceiptBridgeDesktopController(
                     "Smart receipt fit is on for ${profile.name}. The Windows app will ignore large outer page margins before scaling."
                 } else {
                     "Smart receipt fit is off for ${profile.name}. The Windows app will print the full captured receipt page as-is."
+                }
+        }
+    }
+
+    fun updateOdooReceiptRenderMode(profile: PrinterProfile, mode: OdooReceiptRenderMode) {
+        scope.launch {
+            if (profile.resolvedOdooReceiptRenderMode() == mode) {
+                return@launch
+            }
+
+            printerRepository.saveProfile(
+                profile.copy(odooReceiptRenderMode = mode)
+            )
+            _printerActionMessage.value =
+                when (mode) {
+                    OdooReceiptRenderMode.EXACT_LAYOUT ->
+                        "Odoo receipt mode for ${profile.name} set to Exact Layout. The Windows app will prefer the captured Odoo receipt image when available."
+                    OdooReceiptRenderMode.NATIVE_THERMAL ->
+                        "Odoo receipt mode for ${profile.name} set to Native Thermal. The Windows app will rebuild the receipt for thermal printing."
                 }
         }
     }

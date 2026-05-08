@@ -40,6 +40,10 @@
                                     <field name="pos_softbridge_manual_button"/>
                                     <label for="pos_softbridge_manual_button" string="Show Send to Softbridge button" class="fw-normal ms-2"/>
                                 </div>
+                                <div class="mt8" title="Requires the Odoo Restaurant module. When enabled, printing a bill from the Action menu sends it to the Softbridge Windows app.">
+                                    <field name="pos_softbridge_restaurant_bill_action_enabled"/>
+                                    <label for="pos_softbridge_restaurant_bill_action_enabled" string="Send Restaurant Action Bills to Softbridge" class="fw-normal ms-2"/>
+                                </div>
                             </div>
                         </div>
                         <div class="text-muted mt16">

@@ -10,6 +10,7 @@ import com.receiptbridge.desktop.model.PrinterProfile
 import com.receiptbridge.desktop.model.defaultCharactersPerLineForPrintAreaDots
 import com.receiptbridge.desktop.model.defaultPrintAreaDotsForPaperWidthMm
 import com.receiptbridge.desktop.model.normalizePaperWidthMm
+import com.receiptbridge.desktop.model.resolvedOdooReceiptRenderMode
 import com.receiptbridge.desktop.model.resolvedRenderedReceiptFillPercent
 import com.receiptbridge.desktop.model.resolvedRenderedReceiptSmartFit
 import com.receiptbridge.desktop.model.sanitizePrintAreaDots
@@ -137,6 +138,28 @@ class PrinterRepository(
         return _profiles.value.firstOrNull { it.isDefault }
     }
 
+    suspend fun setDefaultProfile(profileId: String): PrinterProfile? {
+        return mutex.withLock {
+            val current = _profiles.value
+            if (current.isEmpty()) {
+                return@withLock null
+            }
+
+            if (current.none { it.id == profileId }) {
+                return@withLock null
+            }
+
+            val normalized = normalizeProfiles(
+                current.map { profile ->
+                    profile.copy(isDefault = profile.id == profileId)
+                }
+            )
+            _profiles.value = normalized
+            storage.saveProfiles(normalized)
+            normalized.firstOrNull { it.id == profileId }
+        }
+    }
+
     suspend fun saveProfile(profile: PrinterProfile) {
         mutex.withLock {
             val current = _profiles.value.toMutableList()
@@ -203,6 +226,7 @@ class PrinterRepository(
                 paperWidthMm = normalizedPaperWidth,
                 printAreaDots = normalizedPrintAreaDots,
                 charactersPerLine = defaultCharactersPerLineForPrintAreaDots(normalizedPrintAreaDots),
+                odooReceiptRenderMode = profile.resolvedOdooReceiptRenderMode(),
                 renderedReceiptFillPercent = profile.resolvedRenderedReceiptFillPercent(),
                 renderedReceiptSmartFit = profile.resolvedRenderedReceiptSmartFit()
             )
@@ -214,7 +238,9 @@ class JobRepository(
     private val storage: DesktopStorage
 ) {
     private val mutex = Mutex()
-    private val _allJobs = MutableStateFlow(sortAllJobs(storage.loadJobs()))
+    private val _allJobs = MutableStateFlow(
+        normalizeStoredJobs(markInterruptedPrintingJobs(storage.loadJobs()))
+    )
     val allJobs: StateFlow<List<PrintJob>> = _allJobs.asStateFlow()
     val pendingJobs: Flow<List<PrintJob>> = allJobs.map { jobs ->
         jobs.filter { it.status == JobStatus.PENDING }.sortedBy { it.timestamp }
@@ -222,7 +248,7 @@ class JobRepository(
 
     suspend fun createJob(job: PrintJob) {
         mutex.withLock {
-            val updated = sortAllJobs(_allJobs.value + job)
+            val updated = normalizeStoredJobs(_allJobs.value + job)
             _allJobs.value = updated
             storage.saveJobs(updated)
         }
@@ -234,7 +260,7 @@ class JobRepository(
 
     suspend fun updateJob(job: PrintJob) {
         mutex.withLock {
-            val updated = sortAllJobs(
+            val updated = normalizeStoredJobs(
                 _allJobs.value.map { existing ->
                     if (existing.id == job.id) job else existing
                 }
@@ -246,8 +272,10 @@ class JobRepository(
 
     suspend fun clearHistoryJobs() {
         mutex.withLock {
-            val updated = _allJobs.value.filter { it.status == JobStatus.PENDING || it.status == JobStatus.PRINTING }
-            _allJobs.value = sortAllJobs(updated)
+            val updated = normalizeStoredJobs(
+                _allJobs.value.filter { it.status == JobStatus.PENDING || it.status == JobStatus.PRINTING }
+            )
+            _allJobs.value = updated
             storage.saveJobs(_allJobs.value)
         }
     }
@@ -260,13 +288,55 @@ class JobRepository(
                     job.status == JobStatus.PRINTING ||
                     job.timestamp >= cutoffMillis
             }
-            _allJobs.value = sortAllJobs(updated)
+            _allJobs.value = normalizeStoredJobs(updated)
             storage.saveJobs(_allJobs.value)
         }
     }
 
+    private fun markInterruptedPrintingJobs(jobs: List<PrintJob>): List<PrintJob> {
+        return jobs.map { job ->
+            if (job.status == JobStatus.PRINTING) {
+                job.copy(
+                    status = JobStatus.FAILED,
+                    errorMessage = job.errorMessage ?: "Print was interrupted before the desktop app restarted."
+                )
+            } else {
+                job
+            }
+        }
+    }
+
+    private fun normalizeStoredJobs(jobs: List<PrintJob>): List<PrintJob> {
+        val activeJobs = jobs.filter { it.status == JobStatus.PENDING || it.status == JobStatus.PRINTING }
+        val historyJobs = jobs
+            .filter { it.status == JobStatus.COMPLETED || it.status == JobStatus.FAILED }
+            .sortedByDescending { it.timestamp }
+            .take(MAX_STORED_HISTORY_JOBS)
+            .map(::compactHistoryPayloadIfNeeded)
+
+        return sortAllJobs(activeJobs + historyJobs)
+    }
+
+    private fun compactHistoryPayloadIfNeeded(job: PrintJob): PrintJob {
+        if (job.payloadJson.length <= MAX_HISTORY_PAYLOAD_CHARS) {
+            return job
+        }
+
+        return job.copy(
+            payloadJson = COMPACTED_HISTORY_PAYLOAD,
+            errorMessage = job.errorMessage ?: "Receipt payload was compacted after printing because it was too large to keep in history."
+        )
+    }
+
     private fun sortAllJobs(jobs: List<PrintJob>): List<PrintJob> {
         return jobs.sortedByDescending { it.timestamp }
+    }
+
+    private companion object {
+        const val MAX_STORED_HISTORY_JOBS = 60
+        const val MAX_HISTORY_PAYLOAD_CHARS = 250_000
+        const val COMPACTED_HISTORY_PAYLOAD =
+            "{\"content\":{\"type\":\"receipt_text\",\"text\":\"This completed job payload was compacted by Softbridge to keep the local bridge responsive.\"}}"
     }
 }
 

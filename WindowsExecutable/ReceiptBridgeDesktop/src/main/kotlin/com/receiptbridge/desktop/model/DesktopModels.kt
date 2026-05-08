@@ -12,6 +12,11 @@ enum class ConnectionType {
     USB
 }
 
+enum class OdooReceiptRenderMode {
+    NATIVE_THERMAL,
+    EXACT_LAYOUT
+}
+
 enum class JobStatus {
     PENDING,
     PRINTING,
@@ -33,6 +38,7 @@ const val DEFAULT_KEEP_HISTORY_DAYS = 30
 const val MIN_SYSTEM_PRINT_CONTENT_FILL_PERCENT = 75
 const val MAX_SYSTEM_PRINT_CONTENT_FILL_PERCENT = 100
 const val DEFAULT_SYSTEM_PRINT_CONTENT_FILL_PERCENT = 92
+const val DEFAULT_EXACT_LAYOUT_RENDERED_RECEIPT_FILL_PERCENT = MAX_SYSTEM_PRINT_CONTENT_FILL_PERCENT
 const val DEFAULT_ODOO_ALLOWED_ORIGINS = "*"
 
 data class PrinterProfile(
@@ -45,6 +51,7 @@ data class PrinterProfile(
     val charactersPerLine: Int = defaultCharactersPerLineForPrintAreaDots(printAreaDots),
     val renderedReceiptFillPercent: Int = DEFAULT_SYSTEM_PRINT_CONTENT_FILL_PERCENT,
     val renderedReceiptSmartFit: Boolean? = null,
+    val odooReceiptRenderMode: OdooReceiptRenderMode? = null,
     val feedLines: Int = 2,
     val autoCut: Boolean = true,
     val isDefault: Boolean = false
@@ -84,7 +91,8 @@ data class PrintContent(
     @SerializedName("text") val text: String? = null,
     @SerializedName("html") val html: String? = null,
     @SerializedName("image") val image: String? = null,
-    @SerializedName("structured_receipt") val structuredReceipt: JsonObject? = null
+    @SerializedName("structured_receipt") val structuredReceipt: JsonObject? = null,
+    @SerializedName("rendered_image_meta") val renderedImageMeta: JsonObject? = null
 )
 
 data class PrintBlock(
@@ -130,15 +138,46 @@ fun sanitizeRenderedReceiptFillPercent(value: Int): Int {
     return sanitizeSystemPrintContentFillPercent(candidate)
 }
 
+fun defaultRenderedReceiptFillPercentFor(
+    renderMode: OdooReceiptRenderMode,
+    fallbackPercent: Int = DEFAULT_SYSTEM_PRINT_CONTENT_FILL_PERCENT
+): Int {
+    return if (renderMode == OdooReceiptRenderMode.EXACT_LAYOUT) {
+        DEFAULT_EXACT_LAYOUT_RENDERED_RECEIPT_FILL_PERCENT
+    } else {
+        sanitizeRenderedReceiptFillPercent(fallbackPercent)
+    }
+}
+
 fun PrinterProfile.resolvedRenderedReceiptFillPercent(
     fallbackPercent: Int = DEFAULT_SYSTEM_PRINT_CONTENT_FILL_PERCENT
 ): Int {
-    val candidate = if (renderedReceiptFillPercent <= 0) fallbackPercent else renderedReceiptFillPercent
+    val resolvedMode = resolvedOdooReceiptRenderMode()
+    val candidate = when {
+        renderedReceiptFillPercent <= 0 -> defaultRenderedReceiptFillPercentFor(resolvedMode, fallbackPercent)
+        resolvedMode == OdooReceiptRenderMode.EXACT_LAYOUT &&
+            renderedReceiptFillPercent == DEFAULT_SYSTEM_PRINT_CONTENT_FILL_PERCENT -> {
+            DEFAULT_EXACT_LAYOUT_RENDERED_RECEIPT_FILL_PERCENT
+        }
+        else -> renderedReceiptFillPercent
+    }
     return sanitizeRenderedReceiptFillPercent(candidate)
 }
 
 fun PrinterProfile.resolvedRenderedReceiptSmartFit(): Boolean {
     return renderedReceiptSmartFit ?: true
+}
+
+fun defaultOdooReceiptRenderModeFor(connectionType: ConnectionType): OdooReceiptRenderMode {
+    return if (connectionType == ConnectionType.USB) {
+        OdooReceiptRenderMode.EXACT_LAYOUT
+    } else {
+        OdooReceiptRenderMode.NATIVE_THERMAL
+    }
+}
+
+fun PrinterProfile.resolvedOdooReceiptRenderMode(): OdooReceiptRenderMode {
+    return odooReceiptRenderMode ?: defaultOdooReceiptRenderModeFor(connectionType)
 }
 
 fun sanitizeKeepHistoryDays(value: Int): Int {

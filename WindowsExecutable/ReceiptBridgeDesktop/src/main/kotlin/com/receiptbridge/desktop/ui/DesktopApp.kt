@@ -34,6 +34,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -49,7 +51,6 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -75,12 +76,14 @@ import com.receiptbridge.desktop.model.MAX_SYSTEM_PRINT_CONTENT_FILL_PERCENT
 import com.receiptbridge.desktop.model.MIN_KEEP_HISTORY_DAYS
 import com.receiptbridge.desktop.model.MIN_PRINT_AREA_DOTS
 import com.receiptbridge.desktop.model.MIN_SYSTEM_PRINT_CONTENT_FILL_PERCENT
+import com.receiptbridge.desktop.model.OdooReceiptRenderMode
 import com.receiptbridge.desktop.model.PAPER_WIDTH_58_MM
 import com.receiptbridge.desktop.model.PAPER_WIDTH_80_MM
 import com.receiptbridge.desktop.model.PRINT_AREA_DOTS_STEP
 import com.receiptbridge.desktop.model.PrintJob
 import com.receiptbridge.desktop.model.PrinterProfile
 import com.receiptbridge.desktop.model.defaultPrintAreaDotsForPaperWidthMm
+import com.receiptbridge.desktop.model.resolvedOdooReceiptRenderMode
 import com.receiptbridge.desktop.model.resolvedPrintAreaDots
 import com.receiptbridge.desktop.model.resolvedRenderedReceiptFillPercent
 import com.receiptbridge.desktop.model.resolvedRenderedReceiptSmartFit
@@ -92,6 +95,7 @@ import com.receiptbridge.desktop.service.BridgeEvent
 import com.receiptbridge.desktop.service.BridgeEventLevel
 import com.receiptbridge.desktop.service.ReceiptBridgeDesktopController
 import com.receiptbridge.desktop.service.ServerState
+import com.receiptbridge.desktop.service.WindowsPrinterQueue
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -109,12 +113,6 @@ private enum class DesktopScreen(
 
 @Composable
 fun ReceiptBridgeDesktopApp(controller: ReceiptBridgeDesktopController) {
-    DisposableEffect(controller) {
-        onDispose {
-            controller.close()
-        }
-    }
-
     val colorScheme = MaterialTheme.colorScheme.copy(
         primary = Color(0xFF0F766E),
         secondary = Color(0xFF1D4ED8),
@@ -212,11 +210,11 @@ private fun HomeScreen(
     onNavigate: (DesktopScreen) -> Unit
 ) {
     val profiles by controller.profiles.collectAsState()
+    val activeProfile by controller.activeProfile.collectAsState()
     val settings by controller.settings.collectAsState()
     val serverState by controller.serverState.collectAsState()
     val printerActionMessage by controller.printerActionMessage.collectAsState()
     val bridgeEvents by controller.bridgeEvents.collectAsState()
-    val defaultProfile = profiles.firstOrNull { it.isDefault } ?: profiles.firstOrNull()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -283,27 +281,28 @@ private fun HomeScreen(
                 title = "Active Printer",
                 accent = Color(0xFFF97316)
             ) {
-                if (defaultProfile == null) {
+                val activePrinter = activeProfile
+                if (activePrinter == null) {
                     Text("No printer has been added yet.")
                     Text("Add a printer profile to enable HTTP jobs and desktop test prints.")
                 } else {
-                    Text(defaultProfile.name, style = MaterialTheme.typography.titleLarge)
-                    Text("${defaultProfile.connectionType} - ${defaultProfile.address}")
-                    Text("Receipt width: ${defaultProfile.paperWidthMm} mm")
-                    Text("Print area: ${defaultProfile.resolvedPrintAreaDots()} dots")
-                    Text("Rendered receipt width: ${defaultProfile.resolvedRenderedReceiptFillPercent(settings.systemPrintContentFillPercent)}%")
-                    Text("Smart receipt fit: ${if (defaultProfile.resolvedRenderedReceiptSmartFit()) "On" else "Off"}")
+                    Text(activePrinter.name, style = MaterialTheme.typography.titleLarge)
+                    Text("${activePrinter.connectionType} - ${activePrinter.address}")
+                    Text("Receipt width: ${activePrinter.paperWidthMm} mm")
+                    Text("Print area: ${activePrinter.resolvedPrintAreaDots()} dots")
+                    Text("Rendered receipt width: ${activePrinter.resolvedRenderedReceiptFillPercent(settings.systemPrintContentFillPercent)}%")
+                    Text("Smart receipt fit: ${if (activePrinter.resolvedRenderedReceiptSmartFit()) "On" else "Off"}")
                     Text("Saved printers: ${profiles.size}")
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Button(
-                            onClick = { controller.queueTestPrint(defaultProfile) },
+                            onClick = { controller.queueTestPrint(activePrinter) },
                             modifier = Modifier.weight(1f)
                         ) {
                             Text("Connection Test")
                         }
                         Button(
-                            onClick = { controller.queueWidthCalibrationPrint(defaultProfile) },
+                            onClick = { controller.queueWidthCalibrationPrint(activePrinter) },
                             modifier = Modifier.weight(1f)
                         ) {
                             Text("Print Calibration Test")
@@ -346,8 +345,21 @@ private fun HomeScreen(
 @Composable
 private fun ProfilesScreen(controller: ReceiptBridgeDesktopController) {
     val profiles by controller.profiles.collectAsState()
+    val activeProfile by controller.activeProfile.collectAsState()
     val printerActionMessage by controller.printerActionMessage.collectAsState()
     var showDialog by remember { mutableStateOf(false) }
+    var selectedProfileId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(profiles, activeProfile?.id) {
+        selectedProfileId = when {
+            profiles.isEmpty() -> null
+            selectedProfileId != null && profiles.any { it.id == selectedProfileId } -> selectedProfileId
+            activeProfile != null -> activeProfile?.id
+            else -> profiles.first().id
+        }
+    }
+
+    val selectedProfile = profiles.firstOrNull { it.id == selectedProfileId } ?: activeProfile ?: profiles.firstOrNull()
 
     Scaffold(
         floatingActionButton = {
@@ -363,6 +375,7 @@ private fun ProfilesScreen(controller: ReceiptBridgeDesktopController) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
         ) {
             ScreenTitle(
                 title = "Printer Profiles",
@@ -384,89 +397,40 @@ private fun ProfilesScreen(controller: ReceiptBridgeDesktopController) {
             }
 
             Spacer(modifier = Modifier.height(12.dp))
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 100.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                items(profiles, key = { it.id }) { profile ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White)
-                    ) {
-                        Column(modifier = Modifier.padding(18.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(profile.name, style = MaterialTheme.typography.titleMedium)
-                                    Text("${profile.connectionType} - ${profile.address}")
-                                    Text("Receipt: ${profile.paperWidthMm} mm - ${profile.resolvedPrintAreaDots()} dots")
-                                    if (profile.isDefault) {
-                                        Text("DEFAULT", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                                IconButton(onClick = { controller.deleteProfile(profile) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete")
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(14.dp))
-                            ReceiptSizeSelector(
-                                selectedPaperWidthMm = profile.paperWidthMm,
-                                onSelect = { controller.updatePaperWidth(profile, it) }
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-                            PrintAreaDotsEditor(
-                                currentPrintAreaDots = profile.resolvedPrintAreaDots(),
-                                paperWidthMm = profile.paperWidthMm,
-                                onChange = { controller.updatePrintAreaDots(profile, it) }
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-                            RenderedReceiptWidthEditor(
-                                currentFillPercent = profile.resolvedRenderedReceiptFillPercent(),
-                                onChange = { controller.updateRenderedReceiptFillPercent(profile, it) }
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-                            SettingToggle(
-                                title = "Smart Receipt Fit",
-                                supportingText = "Ignore the large outer white margins from the browser receipt page before scaling the Odoo receipt to paper width. Turn this off only if you want the full page exactly as captured.",
-                                checked = profile.resolvedRenderedReceiptSmartFit(),
-                                onCheckedChange = { controller.updateRenderedReceiptSmartFit(profile, it) }
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-                            WidthCalibrationAssistant(
-                                profile = profile,
-                                onPrintCalibration = { controller.queueWidthCalibrationPrint(profile) },
-                                onApplySuggestedDots = { controller.updatePrintAreaDots(profile, it) },
-                                onApplySuggestedPaperWidth = { controller.updatePaperWidth(profile, it) }
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Button(
-                                    onClick = { controller.queueTestPrint(profile) },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Connection Test")
-                                }
-                                if (!profile.isDefault) {
-                                    Button(
-                                        onClick = { controller.setDefault(profile) },
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text("Set As Default")
-                                    }
-                                }
-                            }
-                        }
+            if (profiles.isEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Column(modifier = Modifier.padding(18.dp)) {
+                        Text("No saved printers yet.", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Add a printer to tune receipt width, thermal mode, and default printer behavior.")
                     }
                 }
+            } else {
+                if (profiles.size > 1 && selectedProfile != null) {
+                    SelectionDropdown(
+                        label = "Choose Printer To Configure",
+                        selectedLabel = buildProfileSelectionLabel(selectedProfile),
+                        placeholder = "Select a printer profile",
+                        options = profiles,
+                        onSelect = { profile -> selectedProfileId = profile.id },
+                        optionLabel = { profile -> buildProfileSelectionLabel(profile) }
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                selectedProfile?.let { profile ->
+                    PrinterProfileEditorCard(
+                        profile = profile,
+                        controller = controller
+                    )
+                }
             }
+
+            Spacer(modifier = Modifier.height(100.dp))
         }
     }
 
@@ -480,6 +444,94 @@ private fun ProfilesScreen(controller: ReceiptBridgeDesktopController) {
                 showDialog = false
             }
         )
+    }
+}
+
+@Composable
+private fun PrinterProfileEditorCard(
+    profile: PrinterProfile,
+    controller: ReceiptBridgeDesktopController
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(profile.name, style = MaterialTheme.typography.titleMedium)
+                    Text("${profile.connectionType} - ${profile.address}")
+                    Text("Receipt: ${profile.paperWidthMm} mm - ${profile.resolvedPrintAreaDots()} dots")
+                    Text("Odoo: ${profile.resolvedOdooReceiptRenderMode().asFriendlyLabel()}")
+                    if (profile.isDefault) {
+                        Text("DEFAULT", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
+                }
+                IconButton(onClick = { controller.deleteProfile(profile) }) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            ReceiptSizeSelector(
+                selectedPaperWidthMm = profile.paperWidthMm,
+                onSelect = { controller.updatePaperWidth(profile, it) }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            PrintAreaDotsEditor(
+                currentPrintAreaDots = profile.resolvedPrintAreaDots(),
+                paperWidthMm = profile.paperWidthMm,
+                onChange = { controller.updatePrintAreaDots(profile, it) }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            OdooReceiptRenderModeEditor(
+                selectedMode = profile.resolvedOdooReceiptRenderMode(),
+                onSelect = { controller.updateOdooReceiptRenderMode(profile, it) }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            RenderedReceiptWidthEditor(
+                currentFillPercent = profile.resolvedRenderedReceiptFillPercent(),
+                onChange = { controller.updateRenderedReceiptFillPercent(profile, it) }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            SettingToggle(
+                title = "Smart Receipt Fit",
+                supportingText = "Ignore the large outer white margins from the browser receipt page before scaling the Odoo receipt to paper width. Turn this off only if you want the full page exactly as captured.",
+                checked = profile.resolvedRenderedReceiptSmartFit(),
+                onCheckedChange = { controller.updateRenderedReceiptSmartFit(profile, it) }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            WidthCalibrationAssistant(
+                profile = profile,
+                onPrintCalibration = { controller.queueWidthCalibrationPrint(profile) },
+                onApplySuggestedDots = { controller.updatePrintAreaDots(profile, it) },
+                onApplySuggestedPaperWidth = { controller.updatePaperWidth(profile, it) }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = { controller.queueTestPrint(profile) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Connection Test")
+                }
+                if (!profile.isDefault) {
+                    Button(
+                        onClick = { controller.setDefault(profile) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Set As Default")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -544,8 +596,11 @@ private fun QueueScreen(controller: ReceiptBridgeDesktopController) {
                                 }
                             }
                             JobStatus.COMPLETED -> {
-                                Button(onClick = { controller.retryJob(job) }) {
-                                    Text("Re-print")
+                                Button(
+                                    onClick = { controller.retryJob(job) },
+                                    enabled = job.canRetryFromHistory()
+                                ) {
+                                    Text(if (job.canRetryFromHistory()) "Re-print" else "Compacted")
                                 }
                             }
                             else -> Unit
@@ -823,6 +878,8 @@ private fun AddPrinterDialog(
             controller.scanNetwork()
         } else if (type == ConnectionType.USB) {
             address = ""
+            paperWidthMm = PAPER_WIDTH_58_MM
+            printAreaDots = defaultPrintAreaDotsForPaperWidthMm(PAPER_WIDTH_58_MM)
             controller.scanUsbPrinters()
         } else {
             address = ""
@@ -896,24 +953,22 @@ private fun AddPrinterDialog(
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LazyColumn(modifier = Modifier.height(120.dp)) {
-                            items(foundIpDevices, key = { it }) { ip ->
-                                Text(
-                                    text = ip,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            address = ip
-                                            controller.clearNetworkAddressTestMessage()
-                                            if (name.isBlank()) {
-                                                name = "Network Printer $ip"
-                                            }
-                                        }
-                                        .padding(vertical = 8.dp),
-                                    color = if (address == ip) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
+                        if (foundIpDevices.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            SelectionDropdown(
+                                label = "Detected Network Printers",
+                                selectedLabel = foundIpDevices.firstOrNull { it == address }.orEmpty(),
+                                placeholder = "Choose a detected printer",
+                                options = foundIpDevices,
+                                onSelect = { ip ->
+                                    address = ip
+                                    controller.clearNetworkAddressTestMessage()
+                                    if (name.isBlank()) {
+                                        name = "Network Printer $ip"
+                                    }
+                                },
+                                optionLabel = { it }
+                            )
                         }
                         OutlinedTextField(
                             value = address,
@@ -960,37 +1015,23 @@ private fun AddPrinterDialog(
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LazyColumn(modifier = Modifier.height(140.dp)) {
-                            items(foundUsbPrinters, key = { queue -> queue.queueName ?: queue.portName ?: queue.name }) { queue ->
-                                val targetAddress = queue.queueName ?: queue.portName ?: queue.name
-                                val displayLabel = when {
-                                    !queue.queueName.isNullOrBlank() && !queue.portName.isNullOrBlank() && queue.isDefault ->
-                                        "${queue.queueName} (${queue.portName}, Windows default)"
-                                    !queue.queueName.isNullOrBlank() && !queue.portName.isNullOrBlank() ->
-                                        "${queue.queueName} (${queue.portName})"
-                                    !queue.queueName.isNullOrBlank() && queue.isDefault ->
-                                        "${queue.queueName} (Windows default)"
-                                    !queue.queueName.isNullOrBlank() ->
-                                        queue.queueName
-                                    !queue.portName.isNullOrBlank() ->
-                                        "${queue.name} (${queue.portName}, queue will be created on save)"
-                                    else -> queue.name
-                                }
-                                Text(
-                                    text = displayLabel,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            address = targetAddress
-                                            if (name.isBlank()) {
-                                                name = "USB Printer ${queue.name}"
-                                            }
-                                        }
-                                        .padding(vertical = 8.dp),
-                                    color = if (address.equals(targetAddress, ignoreCase = true)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
+                        if (foundUsbPrinters.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            SelectionDropdown(
+                                label = "Detected USB Printers",
+                                selectedLabel = foundUsbPrinters.firstOrNull { queue ->
+                                    address.equals(queue.queueName ?: queue.portName ?: queue.name, ignoreCase = true)
+                                }?.let(::formatUsbPrinterQueueLabel).orEmpty(),
+                                placeholder = "Choose a USB printer",
+                                options = foundUsbPrinters,
+                                onSelect = { queue ->
+                                    address = queue.queueName ?: queue.portName ?: queue.name
+                                    if (name.isBlank()) {
+                                        name = "USB Printer ${queue.name}"
+                                    }
+                                },
+                                optionLabel = { queue -> formatUsbPrinterQueueLabel(queue) }
+                            )
                         }
                         OutlinedTextField(
                             value = address,
@@ -1059,6 +1100,66 @@ private fun AddPrinterDialog(
             }
         }
     )
+}
+
+@Composable
+private fun <T> SelectionDropdown(
+    label: String,
+    selectedLabel: String,
+    placeholder: String,
+    options: List<T>,
+    onSelect: (T) -> Unit,
+    optionLabel: (T) -> String
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.labelMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (selectedLabel.isBlank()) placeholder else selectedLabel)
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(optionLabel(option)) },
+                        onClick = {
+                            onSelect(option)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun buildProfileSelectionLabel(profile: PrinterProfile): String {
+    val defaultSuffix = if (profile.isDefault) " - Default" else ""
+    return "${profile.name} (${profile.connectionType})$defaultSuffix"
+}
+
+private fun formatUsbPrinterQueueLabel(queue: WindowsPrinterQueue): String {
+    return when {
+        !queue.queueName.isNullOrBlank() && !queue.portName.isNullOrBlank() && queue.isDefault ->
+            "${queue.queueName} (${queue.portName}, Windows default)"
+        !queue.queueName.isNullOrBlank() && !queue.portName.isNullOrBlank() ->
+            "${queue.queueName} (${queue.portName})"
+        !queue.queueName.isNullOrBlank() && queue.isDefault ->
+            "${queue.queueName} (Windows default)"
+        !queue.queueName.isNullOrBlank() ->
+            queue.queueName
+        !queue.portName.isNullOrBlank() ->
+            "${queue.name} (${queue.portName}, queue will be created on save)"
+        else -> queue.name
+    }
 }
 
 @Composable
@@ -1258,6 +1359,44 @@ private fun RenderedReceiptWidthEditor(
 }
 
 @Composable
+private fun OdooReceiptRenderModeEditor(
+    selectedMode: OdooReceiptRenderMode,
+    onSelect: (OdooReceiptRenderMode) -> Unit
+) {
+    Column {
+        Text("Odoo Receipt Mode", style = MaterialTheme.typography.labelMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { onSelect(OdooReceiptRenderMode.EXACT_LAYOUT) },
+                enabled = selectedMode != OdooReceiptRenderMode.EXACT_LAYOUT,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Exact Layout")
+            }
+            Button(
+                onClick = { onSelect(OdooReceiptRenderMode.NATIVE_THERMAL) },
+                enabled = selectedMode != OdooReceiptRenderMode.NATIVE_THERMAL,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Native Thermal")
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            when (selectedMode) {
+                OdooReceiptRenderMode.EXACT_LAYOUT ->
+                    "Closest to the Odoo receipt screen. The Windows app will use the captured Odoo receipt image when it is available."
+                OdooReceiptRenderMode.NATIVE_THERMAL ->
+                    "Rebuilds the receipt for thermal output. Usually sharper on tiny text, but spacing and font sizes can differ from Odoo."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF475569)
+        )
+    }
+}
+
+@Composable
 private fun WidthCalibrationAssistant(
     profile: PrinterProfile,
     onPrintCalibration: () -> Unit,
@@ -1441,6 +1580,10 @@ private fun PrintJob.resolvePrinterLabel(
     }
 }
 
+private fun PrintJob.canRetryFromHistory(): Boolean {
+    return !payloadJson.contains("This completed job payload was compacted by Softbridge")
+}
+
 private fun defaultProfileNameHint(
     type: ConnectionType,
     address: String
@@ -1516,6 +1659,13 @@ private fun BridgeEventLevel.asEventColor(): Color {
         BridgeEventLevel.INFO -> Color(0xFF0F766E)
         BridgeEventLevel.WARNING -> Color(0xFFB45309)
         BridgeEventLevel.ERROR -> Color(0xFFB91C1C)
+    }
+}
+
+private fun OdooReceiptRenderMode.asFriendlyLabel(): String {
+    return when (this) {
+        OdooReceiptRenderMode.EXACT_LAYOUT -> "Exact Layout"
+        OdooReceiptRenderMode.NATIVE_THERMAL -> "Native Thermal"
     }
 }
 

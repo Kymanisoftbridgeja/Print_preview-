@@ -21,6 +21,11 @@ class PosConfig(models.Model):
         default=DEFAULT_SOFTBRIDGE_URL,
         help="Base URL of the Windows bridge. The Odoo addon appends /odoo/receipt automatically.",
     )
+    softbridge_restaurant_bill_action_enabled = fields.Boolean(
+        string="Send Restaurant Action Bills to Softbridge",
+        default=True,
+        help="When enabled, printing a bill from the Action menu sends it to the Softbridge Windows app.",
+    )
     softbridge_api_token = fields.Char(
         string="Softbridge Bridge Token",
         help="Optional token that the Odoo POS sends to the Windows bridge.",

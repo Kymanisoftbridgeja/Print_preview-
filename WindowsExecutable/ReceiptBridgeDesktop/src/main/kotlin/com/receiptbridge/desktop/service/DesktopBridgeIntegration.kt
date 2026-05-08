@@ -79,6 +79,7 @@ object BridgePayloadNormalizer {
             ?: json.getOptionalString("receipt_html")
             ?: json.getOptionalString("receipt_markup")
         val structuredReceipt = json.getOptionalObject("structured_receipt")
+        val renderedImageMeta = json.getOptionalObject("rendered_image_meta")
         val preferredRenderedImage = json.getOptionalString("rendered_image")
         val image = json.getOptionalString("image")
             ?: json.getOptionalString("receipt_image")
@@ -102,14 +103,21 @@ object BridgePayloadNormalizer {
         val normalized = JsonObject().apply {
             json.getOptionalString("printer_profile_id")?.let { addProperty("printer_profile_id", it) }
             json.getOptionalInt("copies")?.takeIf { it > 0 }?.let { addProperty("copies", it) }
+            listOf("source", "print_type", "document_type", "order_name", "order_uid").forEach { fieldName ->
+                json.getOptionalString(fieldName)?.let { addProperty(fieldName, it) }
+            }
             add("content", JsonObject().apply {
                 addProperty("type", contentType)
                 when (contentType) {
                     "odoo_structured" -> {
                         add("structured_receipt", structuredReceipt)
                         image?.let { addProperty("image", it) }
+                        renderedImageMeta?.let { add("rendered_image_meta", it.deepCopy()) }
                     }
-                    "receipt_image" -> addProperty("image", image)
+                    "receipt_image" -> {
+                        addProperty("image", image)
+                        renderedImageMeta?.let { add("rendered_image_meta", it.deepCopy()) }
+                    }
                     "receipt_html" -> addProperty("html", html)
                     else -> addProperty("text", text)
                 }

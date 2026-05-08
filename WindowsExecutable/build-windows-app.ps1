@@ -14,11 +14,19 @@ $appName = "ReceiptBridgeDesktop"
 $runtimeImagePath = Join-Path $moduleRoot "build\compose\tmp\main\runtime"
 $jarRoot = Join-Path $moduleRoot "build\compose\jars"
 $jpackage = Join-Path $env:JAVA_HOME "bin\jpackage.exe"
+$localWixBin = Join-Path $windowsRoot "tools\wix314-binaries"
 $staleDistRoots = @(
     (Join-Path $windowsRoot "dist-refresh"),
     (Join-Path $windowsRoot "dist-widthfix"),
     (Join-Path $windowsRoot "dist-calibrated")
 )
+
+if (
+    (Test-Path (Join-Path $localWixBin "candle.exe")) -and
+    (Test-Path (Join-Path $localWixBin "light.exe"))
+) {
+    $env:PATH = "$localWixBin;$env:PATH"
+}
 
 function Get-AppVersion {
     $buildFile = Join-Path $moduleRoot "build.gradle.kts"
@@ -142,10 +150,17 @@ if (Test-Path $launcherPath) {
 
 if ($PackageInstaller) {
     try {
+        if (Test-Path $distAppPath) {
+            Remove-Item $distAppPath -Recurse -Force
+        }
         Invoke-JPackage -Type "exe"
         $installerPath = Join-Path $distRoot "$appName-$appVersion.exe"
         if (Test-Path $installerPath) {
             Write-Host "Installer ready: $installerPath"
+        }
+        Invoke-JPackage -Type "app-image"
+        if (Test-Path $launcherPath) {
+            Write-Host "Desktop app image restored after installer packaging: $launcherPath"
         }
     } catch {
         Write-Warning "Installer packaging failed: $($_.Exception.Message)"

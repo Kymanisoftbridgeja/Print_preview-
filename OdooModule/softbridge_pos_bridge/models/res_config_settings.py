@@ -12,6 +12,10 @@ class ResConfigSettings(models.TransientModel):
         related="pos_config_id.softbridge_bridge_url",
         readonly=False,
     )
+    pos_softbridge_restaurant_bill_action_enabled = fields.Boolean(
+        related="pos_config_id.softbridge_restaurant_bill_action_enabled",
+        readonly=False,
+    )
     pos_softbridge_api_token = fields.Char(
         related="pos_config_id.softbridge_api_token",
         readonly=False,
