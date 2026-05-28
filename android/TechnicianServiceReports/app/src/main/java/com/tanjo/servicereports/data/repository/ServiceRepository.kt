@@ -16,6 +16,7 @@ import com.tanjo.servicereports.data.remote.LoginRequest
 import com.tanjo.servicereports.data.remote.PartDto
 import com.tanjo.servicereports.data.remote.ReportDto
 import com.tanjo.servicereports.data.remote.SyncRequest
+import retrofit2.HttpException
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -30,15 +31,29 @@ class ServiceRepository(context: Context) {
     val jobs: Flow<List<JobEntity>> = dao.observeJobs()
 
     suspend fun login(baseUrl: String, db: String, login: String, password: String) {
-        val api = ApiFactory.create(baseUrl)
-        val response = api.login(LoginRequest(db, login, password))
+        val cleanUrl = baseUrl.trim()
+        require(cleanUrl.startsWith("http://") || cleanUrl.startsWith("https://")) {
+            "Enter the Odoo server URL starting with http:// or https://"
+        }
+        val api = ApiFactory.create(cleanUrl)
+        val response = runCatching {
+            api.login(LoginRequest(db.trim(), login.trim(), password))
+        }.getOrElse { throw friendlyConnectionError(it) }
         prefs.edit()
-            .putString("base_url", baseUrl)
+            .putString("base_url", cleanUrl)
             .putString("token", response.accessToken)
             .putString("technician_name", response.user.name)
             .putString("device_id", prefs.getString("device_id", null) ?: UUID.randomUUID().toString())
             .apply()
         refreshJobs()
+    }
+
+    private fun friendlyConnectionError(error: Throwable): Throwable {
+        val message = when (error) {
+            is HttpException -> "Odoo rejected the login (${error.code()}). Check the database, user, password, and connector module."
+            else -> error.message ?: "Could not reach Odoo. Check the server URL and network."
+        }
+        return IllegalStateException(message, error)
     }
 
     suspend fun refreshJobs() {

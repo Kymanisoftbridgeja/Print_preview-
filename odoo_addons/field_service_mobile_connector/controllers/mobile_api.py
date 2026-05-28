@@ -1,5 +1,6 @@
 import json
 
+from odoo.service import db as db_service
 from odoo import fields, http
 from odoo.exceptions import AccessError
 from odoo.http import request
@@ -21,7 +22,14 @@ class FieldServiceMobileApi(http.Controller):
     @http.route("/api/mobile/login", type="http", auth="none", methods=["POST"], csrf=False)
     def login(self):
         data = self._body()
-        db = data.get("db") or request.session.db
+        db = data.get("db") or request.session.db or self._single_database()
+        if not db:
+            return self._json(
+                {
+                    "error": "Database name is required because this Odoo server has multiple databases."
+                },
+                status=400,
+            )
         uid = request.session.authenticate(db, data.get("login"), data.get("password"))
         if not uid:
             return self._json({"error": "Invalid login"}, status=401)
@@ -34,6 +42,10 @@ class FieldServiceMobileApi(http.Controller):
                 "user": {"id": user.id, "name": user.name, "login": user.login},
             }
         )
+
+    def _single_database(self):
+        databases = db_service.list_dbs(force=True)
+        return databases[0] if len(databases) == 1 else False
 
     @http.route("/api/mobile/jobs", type="http", auth="none", methods=["GET"], csrf=False)
     def jobs(self):

@@ -27,7 +27,8 @@
         android:debuggable="true"
         android:extractNativeLibs="false"
         android:label="Service Reports"
-        android:theme="@style/AppTheme" >
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="true" >
         <activity
             android:name="com.tanjo.servicereports.MainActivity"
             android:exported="true" >

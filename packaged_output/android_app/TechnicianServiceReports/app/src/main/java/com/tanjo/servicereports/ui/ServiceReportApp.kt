@@ -100,7 +100,7 @@ private fun HomeScreen(
     onOpenJob: (JobEntity) -> Unit,
     onEmergency: () -> Unit
 ) {
-    var baseUrl by remember { mutableStateOf("https://your-odoo.example.com") }
+    var baseUrl by remember { mutableStateOf("http://your-odoo-server:8069") }
     var db by remember { mutableStateOf("") }
     var login by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -110,8 +110,8 @@ private fun HomeScreen(
             Card {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Technician Login", fontWeight = FontWeight.Bold)
-                    OutlinedTextField(baseUrl, { baseUrl = it }, label = { Text("Odoo URL") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(db, { db = it }, label = { Text("Database") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(baseUrl, { baseUrl = it }, label = { Text("Odoo Server URL") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(db, { db = it }, label = { Text("Database (optional if only one)") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(login, { login = it }, label = { Text("User") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(password, { password = it }, label = { Text("Password") }, modifier = Modifier.fillMaxWidth())
                     Button(onClick = { onLogin(baseUrl, db, login, password) }, modifier = Modifier.fillMaxWidth()) {
