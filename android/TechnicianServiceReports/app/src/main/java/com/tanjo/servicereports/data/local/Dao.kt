@@ -16,6 +16,9 @@ interface ServiceReportDao {
     @Query("select * from service_reports where jobId = :jobId limit 1")
     suspend fun reportForJob(jobId: Long): ServiceReportEntity?
 
+    @Query("select * from service_reports where odooId = :reportId limit 1")
+    suspend fun reportForOdooId(reportId: Long): ServiceReportEntity?
+
     @Query("select * from service_reports where syncStatus in ('Pending Sync', 'Sync Failed', 'Syncing')")
     suspend fun pendingReports(): List<ServiceReportEntity>
 

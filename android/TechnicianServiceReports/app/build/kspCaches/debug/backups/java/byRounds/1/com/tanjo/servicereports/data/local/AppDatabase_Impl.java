@@ -31,15 +31,15 @@ public final class AppDatabase_Impl extends AppDatabase {
   @Override
   @NonNull
   protected SupportSQLiteOpenHelper createOpenHelper(@NonNull final DatabaseConfiguration config) {
-    final SupportSQLiteOpenHelper.Callback _openCallback = new RoomOpenHelper(config, new RoomOpenHelper.Delegate(2) {
+    final SupportSQLiteOpenHelper.Callback _openCallback = new RoomOpenHelper(config, new RoomOpenHelper.Delegate(3) {
       @Override
       public void createAllTables(@NonNull final SupportSQLiteDatabase db) {
-        db.execSQL("CREATE TABLE IF NOT EXISTS `jobs` (`id` INTEGER NOT NULL, `jobNumber` TEXT NOT NULL, `customerId` INTEGER, `companyName` TEXT NOT NULL, `contactName` TEXT NOT NULL, `address` TEXT NOT NULL, `scheduledDate` TEXT NOT NULL, `serviceType` TEXT NOT NULL, `jobStatus` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, `reportStatus` TEXT NOT NULL, `description` TEXT NOT NULL, PRIMARY KEY(`id`))");
+        db.execSQL("CREATE TABLE IF NOT EXISTS `jobs` (`id` INTEGER NOT NULL, `reportId` INTEGER, `jobNumber` TEXT NOT NULL, `customerId` INTEGER, `companyName` TEXT NOT NULL, `contactName` TEXT NOT NULL, `address` TEXT NOT NULL, `scheduledDate` TEXT NOT NULL, `serviceType` TEXT NOT NULL, `jobStatus` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, `reportStatus` TEXT NOT NULL, `description` TEXT NOT NULL, PRIMARY KEY(`id`))");
         db.execSQL("CREATE TABLE IF NOT EXISTS `service_reports` (`localId` TEXT NOT NULL, `odooId` INTEGER, `mobileExternalId` TEXT NOT NULL, `jobId` INTEGER, `reportNumber` TEXT NOT NULL, `customerId` INTEGER, `customerName` TEXT NOT NULL, `companyName` TEXT NOT NULL, `contactName` TEXT NOT NULL, `address` TEXT NOT NULL, `serviceDate` TEXT NOT NULL, `arrivalTime` TEXT NOT NULL, `departureTime` TEXT NOT NULL, `laborHours` REAL NOT NULL, `vehicle` TEXT NOT NULL, `poReference` TEXT NOT NULL, `serviceType` TEXT NOT NULL, `originalReportNumber` TEXT NOT NULL, `make` TEXT NOT NULL, `model` TEXT NOT NULL, `kva` TEXT NOT NULL, `equipmentType` TEXT NOT NULL, `serialNumber` TEXT NOT NULL, `load` TEXT NOT NULL, `inputVoltage` TEXT NOT NULL, `outputVoltage` TEXT NOT NULL, `systemDown` INTEGER NOT NULL, `batteryManufacturer` TEXT NOT NULL, `batteryType` TEXT NOT NULL, `batteryRating` TEXT NOT NULL, `batteryQuantity` INTEGER NOT NULL, `problemReported` TEXT NOT NULL, `defectsFound` TEXT NOT NULL, `correctiveAction` TEXT NOT NULL, `recommendations` TEXT NOT NULL, `techniciansOnSite` TEXT NOT NULL, `statusOfService` TEXT NOT NULL, `customerSignaturePath` TEXT NOT NULL, `technicianSignaturePath` TEXT NOT NULL, `technicianName` TEXT NOT NULL, `signatureDateTime` TEXT NOT NULL, `state` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, `syncError` TEXT NOT NULL, PRIMARY KEY(`localId`))");
         db.execSQL("CREATE TABLE IF NOT EXISTS `parts` (`id` TEXT NOT NULL, `reportLocalId` TEXT NOT NULL, `partName` TEXT NOT NULL, `serialNumber` TEXT NOT NULL, `quantity` REAL NOT NULL, `conditionType` TEXT NOT NULL, `invoiceable` INTEGER NOT NULL, `notes` TEXT NOT NULL, PRIMARY KEY(`id`))");
         db.execSQL("CREATE TABLE IF NOT EXISTS `attachments` (`id` TEXT NOT NULL, `reportLocalId` TEXT NOT NULL, `filePath` TEXT NOT NULL, `mimeType` TEXT NOT NULL, `category` TEXT NOT NULL, PRIMARY KEY(`id`))");
         db.execSQL("CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)");
-        db.execSQL("INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '5ff3a452e565eff954143ef5c808c86f')");
+        db.execSQL("INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ae414d499a4879323cd9d7c0014539f8')");
       }
 
       @Override
@@ -91,8 +91,9 @@ public final class AppDatabase_Impl extends AppDatabase {
       @NonNull
       public RoomOpenHelper.ValidationResult onValidateSchema(
           @NonNull final SupportSQLiteDatabase db) {
-        final HashMap<String, TableInfo.Column> _columnsJobs = new HashMap<String, TableInfo.Column>(12);
+        final HashMap<String, TableInfo.Column> _columnsJobs = new HashMap<String, TableInfo.Column>(13);
         _columnsJobs.put("id", new TableInfo.Column("id", "INTEGER", true, 1, null, TableInfo.CREATED_FROM_ENTITY));
+        _columnsJobs.put("reportId", new TableInfo.Column("reportId", "INTEGER", false, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsJobs.put("jobNumber", new TableInfo.Column("jobNumber", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsJobs.put("customerId", new TableInfo.Column("customerId", "INTEGER", false, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsJobs.put("companyName", new TableInfo.Column("companyName", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
@@ -202,7 +203,7 @@ public final class AppDatabase_Impl extends AppDatabase {
         }
         return new RoomOpenHelper.ValidationResult(true, null);
       }
-    }, "5ff3a452e565eff954143ef5c808c86f", "d89639e01e7a35c87b8f568b0f89fd2c");
+    }, "ae414d499a4879323cd9d7c0014539f8", "470662fcc965506d6138356f85036115");
     final SupportSQLiteOpenHelper.Configuration _sqliteConfig = SupportSQLiteOpenHelper.Configuration.builder(config.context).name(config.name).callback(_openCallback).build();
     final SupportSQLiteOpenHelper _helper = config.sqliteOpenHelperFactory.create(_sqliteConfig);
     return _helper;

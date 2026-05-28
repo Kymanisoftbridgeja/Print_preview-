@@ -81,12 +81,12 @@ class FieldServiceMobileApi(http.Controller):
     def jobs(self):
         try:
             env = self._user_env()
-            jobs = [self._job_payload(job, env) for job in self._assigned_jobs(env)]
+            jobs = [self._report_job_payload(report, env) for report in self._assigned_reports(env)]
             return self._json(
                 {
                     "success": True,
                     "jobs": jobs,
-                    "message": "No assigned Jobs found for this technician." if not jobs else "",
+                    "message": "No assigned Service Reports found for this technician." if not jobs else "",
                 }
             )
         except Exception as exc:
@@ -96,10 +96,9 @@ class FieldServiceMobileApi(http.Controller):
     def job_detail(self, job_id):
         try:
             env = self._user_env()
-            job = self._assigned_job(env, job_id)
-            payload = self._job_payload(job, env)
-            report = self._report_for_job(env, job)
-            payload["report"] = self._report_payload(report, full=True) if report else None
+            report = self._report_from_mobile_id(env, job_id)
+            payload = self._report_job_payload(report, env)
+            payload["report"] = self._report_payload(report, full=True)
             return self._success(payload)
         except Exception as exc:
             return self._failure(exc, status=400)
@@ -114,8 +113,7 @@ class FieldServiceMobileApi(http.Controller):
     def job_service_report(self, job_id):
         try:
             env = self._user_env()
-            job = self._assigned_job(env, job_id)
-            report = self._ensure_report_for_job(env, job)
+            report = self._report_from_mobile_id(env, job_id)
             return self._success({"report": self._report_payload(report, full=True)})
         except Exception as exc:
             return self._failure(exc, status=400)
@@ -130,8 +128,19 @@ class FieldServiceMobileApi(http.Controller):
     def start_job(self, job_id):
         try:
             env = self._user_env()
-            job = self._assigned_job(env, job_id)
-            report = self._ensure_report_for_job(env, job)
+            report = self._report_from_mobile_id(env, job_id)
+            job = report.task_id
+            if report.state in ("submitted", "approved", "quotation_created"):
+                return self._success(
+                    {
+                        "job_id": job.id if job else None,
+                        "report_id": report.id,
+                        "state": report.state,
+                        "sync_status": "synced",
+                        "message": "Service report is already submitted for backend review.",
+                        "report": self._report_payload(report, full=True),
+                    }
+                )
             if report.state not in ("draft", "assigned", "rejected", "completed"):
                 raise UserError("Only draft, assigned, rejected, or completed reports can be started.")
             now = fields.Datetime.now()
@@ -145,7 +154,7 @@ class FieldServiceMobileApi(http.Controller):
             )
             return self._success(
                 {
-                    "job_id": job.id,
+                    "job_id": job.id if job else None,
                     "report_id": report.id,
                     "state": report.state,
                     "sync_status": "synced",
@@ -166,8 +175,19 @@ class FieldServiceMobileApi(http.Controller):
     def stop_job(self, job_id):
         try:
             env = self._user_env()
-            job = self._assigned_job(env, job_id)
-            report = self._ensure_report_for_job(env, job)
+            report = self._report_from_mobile_id(env, job_id)
+            job = report.task_id
+            if report.state in ("submitted", "approved", "quotation_created"):
+                return self._success(
+                    {
+                        "job_id": job.id if job else None,
+                        "report_id": report.id,
+                        "state": report.state,
+                        "sync_status": "synced",
+                        "message": "Service report is already submitted for backend review.",
+                        "report": self._report_payload(report, full=True),
+                    }
+                )
             if report.state != "in_progress":
                 raise UserError("Only in-progress reports can be stopped.")
             now = fields.Datetime.now()
@@ -178,11 +198,11 @@ class FieldServiceMobileApi(http.Controller):
                 "mobile_last_sync_at": now,
             }
             report.with_context(service_report_skip_lock=True).write(values)
-            if "fsm_done" in job._fields:
+            if job and "fsm_done" in job._fields:
                 job.write({"fsm_done": True})
             return self._success(
                 {
-                    "job_id": job.id,
+                    "job_id": job.id if job else None,
                     "report_id": report.id,
                     "state": report.state,
                     "labor_hours": report.labor_hours,
@@ -200,7 +220,7 @@ class FieldServiceMobileApi(http.Controller):
             env = self._user_env()
             data = self._body()
             report = self._upsert_report(env, data)
-            if data.get("submit"):
+            if data.get("submit") and report.state not in ("submitted", "approved", "quotation_created"):
                 report.action_submit()
             return self._success({"report": self._report_payload(report, full=True)})
         except Exception as exc:
@@ -319,7 +339,7 @@ class FieldServiceMobileApi(http.Controller):
         for item in self._body().get("reports", []):
             try:
                 report = self._upsert_report(env, item)
-                if item.get("submit"):
+                if item.get("submit") and report.state not in ("submitted", "approved", "quotation_created"):
                     if report.state not in ("completed", "rejected", "draft"):
                         report.with_context(service_report_skip_lock=True).write({"state": "completed"})
                     report.action_submit()
@@ -328,6 +348,7 @@ class FieldServiceMobileApi(http.Controller):
                         "mobile_external_id": item.get("mobile_external_id"),
                         "odoo_id": report.id,
                         "report_number": report.name,
+                        "state": report.state,
                         "status": "synced",
                         "error": None,
                     }
@@ -341,6 +362,44 @@ class FieldServiceMobileApi(http.Controller):
                     }
                 )
         return self._json({"success": True, "results": results})
+
+    def _assigned_reports(self, env):
+        Report = env["field.service.road.report"].sudo()
+        reports = Report.search([], order="service_date desc, id desc")
+        if env.user.has_group("field_service_road_reports.group_service_report_manager"):
+            return reports
+        return reports.filtered(lambda report: self._report_assigned_to_user(report, env.user))
+
+    def _assigned_report(self, env, report_id):
+        report = env["field.service.road.report"].sudo().browse(report_id).exists()
+        if not report:
+            return report
+        if not self._report_assigned_to_user(report, env.user) and not env.user.has_group(
+            "field_service_road_reports.group_service_report_manager"
+        ):
+            raise AccessError("Access denied for technician.")
+        return report
+
+    def _report_from_mobile_id(self, env, record_id):
+        report = env["field.service.road.report"].sudo().browse(record_id).exists()
+        if report and (
+            self._report_assigned_to_user(report, env.user)
+            or env.user.has_group("field_service_road_reports.group_service_report_manager")
+        ):
+            return report
+        report_access_error = AccessError("Access denied for technician.") if report else False
+        try:
+            job = self._assigned_job(env, record_id)
+        except Exception:
+            if report_access_error:
+                raise report_access_error
+            raise
+        return self._ensure_report_for_job(env, job)
+
+    def _report_assigned_to_user(self, report, user):
+        if report.driver_id == user:
+            return True
+        return bool(report.task_id and self._job_assigned_to_user(report.task_id, user))
 
     def _assigned_jobs(self, env):
         Task = env["project.task"].sudo()
@@ -411,12 +470,7 @@ class FieldServiceMobileApi(http.Controller):
             job = self._assigned_job(env, data["job_id"])
             report = self._report_for_job(env, job)
         if report and report.state in ("submitted", "approved", "quotation_created"):
-            if data.get("submit"):
-                return report
-            raise UserError(
-                "Submitted reports cannot be edited by technicians. "
-                "Ask a reviewer to send it back for correction."
-            )
+            return report
         values = self._report_values(env, data)
         if "parts" in data or "lines" in data:
             lines = data.get("parts") if "parts" in data else data.get("lines")
@@ -501,6 +555,37 @@ class FieldServiceMobileApi(http.Controller):
             "quantity": line.get("quantity") or 1,
             "invoiceable": bool(line.get("invoiceable", True)),
             "notes": line.get("notes"),
+        }
+
+    def _report_job_payload(self, report, env=None):
+        job = report.task_id
+        partner = report.customer_id if report.customer_id else (job.partner_id if job and job.partner_id else False)
+        company = report.billable_partner_id or (partner.parent_id or partner if partner else False)
+        contact = report.contact_person_id or (partner if partner and partner != company else False)
+        scheduled_date = ""
+        if report.service_date:
+            scheduled_date = fields.Date.to_string(report.service_date)
+        elif job and "planned_date_begin" in job._fields and job.planned_date_begin:
+            scheduled_date = fields.Datetime.to_string(job.planned_date_begin)
+        job_name = (job.display_name or job.name) if job else ""
+        report_name = report.name or f"Service Report #{report.id}"
+        return {
+            "id": job.id if job else report.id,
+            "report_id": report.id,
+            "job_number": f"{report_name} - {job_name}" if job_name else report_name,
+            "customer_id": partner.id if partner else None,
+            "company_name": report.report_company_name or (company.name if company else ""),
+            "contact_name": report.site_contact or (contact.name if contact else ""),
+            "address": report.report_address
+            or report.customer_address
+            or report.location
+            or (partner.contact_address if partner and "contact_address" in partner._fields else ""),
+            "scheduled_date": scheduled_date,
+            "service_type": report.service_type or "",
+            "status": report.state,
+            "sync_status": "synced",
+            "report_status": report.state,
+            "description": report.problem_service_rendered or (job.description if job else ""),
         }
 
     def _job_payload(self, job, env=None):

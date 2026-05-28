@@ -79,6 +79,7 @@ class ServiceRepository(context: Context) {
                 val jobId = it.id.asLongOrNull() ?: return@mapNotNull null
                 JobEntity(
                     id = jobId,
+                    reportId = it.reportId.asLongOrNull(),
                     jobNumber = it.jobNumber.ifBlank { "Job #$jobId" },
                     customerId = it.customerId.asLongOrNull(),
                     companyName = it.companyName.orEmpty(),
@@ -98,9 +99,9 @@ class ServiceRepository(context: Context) {
     }
 
     suspend fun reportForJob(job: JobEntity): ServiceReportEntity {
-        val existing = dao.reportForJob(job.id)
+        val existing = job.reportId?.let { dao.reportForOdooId(it) } ?: dao.reportForJob(job.id)
         return try {
-            val response = runRemote("service-report") { api().serviceReport(bearer(), job.id) }
+            val response = runRemote("service-report") { api().serviceReport(bearer(), job.reportId ?: job.id) }
             if (!response.success || response.report == null) {
                 throw IllegalStateException(response.error ?: "Service report not found.")
             }
@@ -156,9 +157,9 @@ class ServiceRepository(context: Context) {
             syncError = ""
         )
         dao.upsertReport(localStart)
-        val jobId = localStart.jobId ?: return "Start saved locally for emergency report"
+        val remoteId = localStart.odooId ?: localStart.jobId ?: return "Start saved locally for emergency report"
         return try {
-            val response = runRemote("start-job") { api().startJob(bearer(), jobId) }
+            val response = runRemote("start-job") { api().startJob(bearer(), remoteId) }
             applyJobAction(localStart, response)
             response.message ?: "Job started successfully"
         } catch (error: Throwable) {
@@ -183,9 +184,9 @@ class ServiceRepository(context: Context) {
             syncError = ""
         )
         dao.upsertReport(localStop)
-        val jobId = localStop.jobId ?: return "Stop saved locally for emergency report"
+        val remoteId = localStop.odooId ?: localStop.jobId ?: return "Stop saved locally for emergency report"
         return try {
-            val response = runRemote("stop-job") { api().stopJob(bearer(), jobId) }
+            val response = runRemote("stop-job") { api().stopJob(bearer(), remoteId) }
             applyJobAction(localStop, response)
             response.message ?: "Job stopped successfully"
         } catch (error: Throwable) {
@@ -241,6 +242,7 @@ class ServiceRepository(context: Context) {
                     report.copy(
                         odooId = result.odooId ?: report.odooId,
                         reportNumber = result.reportNumber ?: report.reportNumber,
+                        state = result.state ?: report.state,
                         syncStatus = if (synced) "Synced" else "Sync Failed",
                         syncError = result.error.orEmpty()
                     )

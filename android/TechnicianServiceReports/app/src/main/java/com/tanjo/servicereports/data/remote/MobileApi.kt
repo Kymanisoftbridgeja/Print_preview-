@@ -71,6 +71,7 @@ data class JobsResponse(
 )
 data class JobDto(
     val id: Any?,
+    @Json(name = "report_id") val reportId: Any? = null,
     @Json(name = "job_number") val jobNumber: String,
     @Json(name = "customer_id") val customerId: Any?,
     @Json(name = "company_name") val companyName: String?,
@@ -151,6 +152,7 @@ data class SyncResultDto(
     @Json(name = "mobile_external_id") val mobileExternalId: String,
     @Json(name = "odoo_id") val odooId: Long?,
     @Json(name = "report_number") val reportNumber: String?,
+    val state: String? = null,
     val status: String,
     val error: String?
 )

@@ -7,6 +7,7 @@ import java.util.UUID
 @Entity(tableName = "jobs")
 data class JobEntity(
     @PrimaryKey val id: Long,
+    val reportId: Long? = null,
     val jobNumber: String,
     val customerId: Long?,
     val companyName: String,
