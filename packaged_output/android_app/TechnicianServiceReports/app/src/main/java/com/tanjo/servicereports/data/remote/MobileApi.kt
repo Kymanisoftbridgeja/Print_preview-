@@ -34,16 +34,16 @@ data class LoginResponse(
 data class UserDto(val id: Long, val name: String, val login: String)
 data class JobsResponse(val jobs: List<JobDto>)
 data class JobDto(
-    val id: Long,
+    val id: Any?,
     @Json(name = "job_number") val jobNumber: String,
-    @Json(name = "customer_id") val customerId: Long?,
-    @Json(name = "company_name") val companyName: String,
-    @Json(name = "contact_name") val contactName: String,
-    val address: String,
-    @Json(name = "scheduled_date") val scheduledDate: String,
-    @Json(name = "service_type") val serviceType: String,
-    val status: String,
-    val description: String
+    @Json(name = "customer_id") val customerId: Any?,
+    @Json(name = "company_name") val companyName: String?,
+    @Json(name = "contact_name") val contactName: String?,
+    val address: String?,
+    @Json(name = "scheduled_date") val scheduledDate: String?,
+    @Json(name = "service_type") val serviceType: String?,
+    val status: String?,
+    val description: String?
 )
 
 data class SyncRequest(val reports: List<ReportDto>)

@@ -54,10 +54,15 @@ class FieldServiceMobileApi(http.Controller):
         if db:
             request.session.db = db
         authenticate = request.session.authenticate
+        credential = {"login": login, "password": password, "type": "password"}
         parameter_count = len(inspect.signature(authenticate).parameters)
         if parameter_count == 2:
-            return authenticate(login, password)
-        return authenticate(db, login, password)
+            auth_info = authenticate(request.env, credential)
+        else:
+            auth_info = authenticate(db, login, password)
+        if isinstance(auth_info, dict):
+            return auth_info.get("uid") or request.session.uid
+        return auth_info or request.session.uid
 
     @http.route("/api/mobile/jobs", type="http", auth="none", methods=["GET"], csrf=False)
     def jobs(self):
@@ -261,13 +266,13 @@ class FieldServiceMobileApi(http.Controller):
         }
 
     def _job_payload(self, job):
-        partner = job.partner_id
-        company = partner.parent_id or partner
+        partner = job.partner_id if job.partner_id else False
+        company = (partner.parent_id or partner) if partner else False
         contact = partner if partner and partner != company else False
         return {
             "id": job.id,
-            "job_number": job.display_name,
-            "customer_id": partner.id,
+            "job_number": job.display_name or "",
+            "customer_id": partner.id if partner else None,
             "company_name": company.name if company else "",
             "contact_name": contact.name if contact else "",
             "address": partner.contact_address if partner and "contact_address" in partner._fields else "",
@@ -283,7 +288,7 @@ class FieldServiceMobileApi(http.Controller):
         return {
             "id": report.id,
             "report_number": report.name,
-            "job_id": report.task_id.id,
+            "job_id": report.task_id.id if report.task_id else None,
             "mobile_external_id": report.mobile_external_id,
             "state": report.state,
             "labor_hours": report.labor_hours,

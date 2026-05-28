@@ -60,18 +60,19 @@ class ServiceRepository(context: Context) {
         val api = api()
         val response = api.jobs(bearer())
         dao.upsertJobs(
-            response.jobs.map {
+            response.jobs.mapNotNull {
+                val jobId = it.id.asLongOrNull() ?: return@mapNotNull null
                 JobEntity(
-                    id = it.id,
+                    id = jobId,
                     jobNumber = it.jobNumber,
-                    customerId = it.customerId,
-                    companyName = it.companyName,
-                    contactName = it.contactName,
-                    address = it.address,
-                    scheduledDate = it.scheduledDate,
-                    serviceType = it.serviceType,
-                    jobStatus = it.status,
-                    description = it.description
+                    customerId = it.customerId.asLongOrNull(),
+                    companyName = it.companyName.orEmpty(),
+                    contactName = it.contactName.orEmpty(),
+                    address = it.address.orEmpty(),
+                    scheduledDate = it.scheduledDate.orEmpty(),
+                    serviceType = it.serviceType.orEmpty(),
+                    jobStatus = it.status.orEmpty(),
+                    description = it.description.orEmpty()
                 )
             }
         )
@@ -181,4 +182,10 @@ class ServiceRepository(context: Context) {
     private fun mobileExternalId(): String = "${prefs.getString("device_id", UUID.randomUUID().toString())}-${UUID.randomUUID()}"
     private fun bearer() = "Bearer ${prefs.getString("token", "")}"
     private fun api() = ApiFactory.create(prefs.getString("base_url", "") ?: "")
+
+    private fun Any?.asLongOrNull(): Long? = when (this) {
+        is Number -> toLong()
+        is String -> toLongOrNull()
+        else -> null
+    }
 }

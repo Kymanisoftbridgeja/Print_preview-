@@ -1,7 +1,7 @@
 {
     "name": "Field Service Mobile Connector",
     "summary": "Android connector for existing Field Service Road Reports",
-    "version": "1.0.0",
+    "version": "1.0.4",
     "category": "Services/Field Service",
     "author": "Tanjo Electrical",
     "license": "LGPL-3",
