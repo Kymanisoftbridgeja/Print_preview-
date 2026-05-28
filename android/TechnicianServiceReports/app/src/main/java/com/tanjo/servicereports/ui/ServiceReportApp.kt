@@ -55,6 +55,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tanjo.servicereports.data.local.JobEntity
 import com.tanjo.servicereports.data.local.PartEntity
 import com.tanjo.servicereports.data.local.ServiceReportEntity
+import com.tanjo.servicereports.data.repository.ConnectionDefaults
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,7 +82,7 @@ fun ServiceReportApp(vm: ServiceReportViewModel = viewModel()) {
         ) { padding ->
             Surface(Modifier.fillMaxSize().padding(padding)) {
                     if (report == null) {
-                        HomeScreen(jobs, message, vm::login, vm::openJob, vm::newEmergencyReport)
+                        HomeScreen(jobs, message, vm.connectionDefaults, vm::login, vm::openJob, vm::newEmergencyReport)
                     } else {
                     ReportScreen(report!!, parts, message, vm::save, vm::start, vm::stop, vm::submit, vm::addPart, vm::removePart, vm::addPhoto) {
                         vm.selectedReportId.value = null
@@ -96,13 +97,14 @@ fun ServiceReportApp(vm: ServiceReportViewModel = viewModel()) {
 private fun HomeScreen(
     jobs: List<JobEntity>,
     message: String,
+    connectionDefaults: ConnectionDefaults,
     onLogin: (String, String, String, String) -> Unit,
     onOpenJob: (JobEntity) -> Unit,
     onEmergency: () -> Unit
 ) {
-    var baseUrl by remember { mutableStateOf("http://your-odoo-server:8069") }
-    var db by remember { mutableStateOf("") }
-    var login by remember { mutableStateOf("") }
+    var baseUrl by remember(connectionDefaults) { mutableStateOf(connectionDefaults.baseUrl) }
+    var db by remember(connectionDefaults) { mutableStateOf(connectionDefaults.db) }
+    var login by remember(connectionDefaults) { mutableStateOf(connectionDefaults.login) }
     var password by remember { mutableStateOf("") }
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -110,7 +112,7 @@ private fun HomeScreen(
             Card {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Technician Login", fontWeight = FontWeight.Bold)
-                    OutlinedTextField(baseUrl, { baseUrl = it }, label = { Text("Odoo Server URL") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(baseUrl, { baseUrl = it }, label = { Text("Odoo Server URL") }, placeholder = { Text("https://your-odoo-server") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(db, { db = it }, label = { Text("Database (optional if only one)") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(login, { login = it }, label = { Text("User") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(password, { password = it }, label = { Text("Password") }, modifier = Modifier.fillMaxWidth())
@@ -125,6 +127,11 @@ private fun HomeScreen(
             Button(onClick = onEmergency, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Text("New Service Report")
+            }
+        }
+        if (jobs.isEmpty()) {
+            item {
+                Text("No Jobs synced yet. Log in, then tap Refresh. Offline reports remain saved on this device.")
             }
         }
         items(jobs) { job ->
@@ -181,21 +188,43 @@ private fun ReportScreen(
             onAddPhoto(report.localId, uri.toString())
         }
     }
+    val lockedSyncedReport = report.state in setOf("submitted", "approved", "quotation_created") &&
+        report.syncStatus == "Synced"
+    val canEdit = !lockedSyncedReport
+    val canStartStop = report.state !in setOf("submitted", "approved", "quotation_created") &&
+        report.syncStatus != "Syncing"
+    val submitLabel = if (report.state == "submitted" && report.syncStatus != "Synced") {
+        "Retry Submit"
+    } else {
+        "Submit Report"
+    }
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onBack) { Text("Jobs") }
-                Button(onClick = { onStart(draft) }) {
+                Button(onClick = { onStart(draft) }, enabled = canStartStop) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null)
                     Text("Start Job")
                 }
-                Button(onClick = { onStop(draft) }) {
+                Button(onClick = { onStop(draft) }, enabled = canStartStop) {
                     Icon(Icons.Default.Stop, contentDescription = null)
                     Text("Stop Job")
                 }
             }
             Text("Status: ${report.state} | Sync: ${report.syncStatus}", fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onSave(draft) }, enabled = canEdit, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.Save, contentDescription = null)
+                    Text("Save Draft")
+                }
+                Button(onClick = { onSubmit(draft) }, enabled = canEdit, modifier = Modifier.weight(1f)) {
+                    Text(submitLabel)
+                }
+            }
+            if (lockedSyncedReport) {
+                Text("Submitted reports are waiting for backend review. A reviewer must send it back before technicians can edit it.")
+            }
             if (report.syncError.isNotBlank()) Text(report.syncError, color = MaterialTheme.colorScheme.error)
             if (message.isNotBlank()) Text(message)
         }
@@ -288,11 +317,11 @@ private fun ReportScreen(
             Divider()
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { onSave(draft) }) {
+                Button(onClick = { onSave(draft) }, enabled = canEdit) {
                     Icon(Icons.Default.Save, contentDescription = null)
                     Text("Save Draft")
                 }
-                Button(onClick = { onSubmit(draft) }) { Text("Submit Report") }
+                Button(onClick = { onSubmit(draft) }, enabled = canEdit) { Text(submitLabel) }
             }
         }
     }

@@ -28,6 +28,12 @@ import kotlinx.coroutines.flow.Flow
 import org.json.JSONObject
 import retrofit2.HttpException
 
+data class ConnectionDefaults(
+    val baseUrl: String = "",
+    val db: String = "",
+    val login: String = ""
+)
+
 class ServiceRepository(context: Context) {
     private val appContext = context.applicationContext
     private val prefs: SharedPreferences =
@@ -36,7 +42,18 @@ class ServiceRepository(context: Context) {
 
     val jobs: Flow<List<JobEntity>> = dao.observeJobs()
 
-    suspend fun login(baseUrl: String, db: String, login: String, password: String) {
+    val connectionDefaults: ConnectionDefaults
+        get() = ConnectionDefaults(
+            baseUrl = prefs.getString("base_url", "").orEmpty(),
+            db = prefs.getString("db", "").orEmpty(),
+            login = prefs.getString("login", "").orEmpty()
+        )
+
+    fun hasSavedSession(): Boolean =
+        prefs.getString("base_url", "").orEmpty().isNotBlank() &&
+            prefs.getString("token", "").orEmpty().isNotBlank()
+
+    suspend fun login(baseUrl: String, db: String, login: String, password: String): String {
         val cleanUrl = baseUrl.trim()
         require(cleanUrl.startsWith("http://") || cleanUrl.startsWith("https://")) {
             "Enter the Odoo server URL starting with http:// or https://"
@@ -46,14 +63,16 @@ class ServiceRepository(context: Context) {
         }
         prefs.edit()
             .putString("base_url", cleanUrl)
+            .putString("db", db.trim())
+            .putString("login", login.trim())
             .putString("token", response.accessToken)
             .putString("technician_name", response.user.name)
             .putString("device_id", prefs.getString("device_id", null) ?: UUID.randomUUID().toString())
             .apply()
-        refreshJobs()
+        return refreshJobs()
     }
 
-    suspend fun refreshJobs() {
+    suspend fun refreshJobs(): String {
         val response = runRemote("jobs") { api().jobs(bearer()) }
         if (response.success == false) throw IllegalStateException(response.error ?: "Odoo rejected the Job sync.")
         val jobs = response.jobs.mapNotNull {
@@ -75,6 +94,7 @@ class ServiceRepository(context: Context) {
             }
         dao.deleteJobs()
         dao.upsertJobs(jobs)
+        return response.message?.takeIf { it.isNotBlank() } ?: "${jobs.size} Jobs synced"
     }
 
     suspend fun reportForJob(job: JobEntity): ServiceReportEntity {
@@ -143,8 +163,14 @@ class ServiceRepository(context: Context) {
             response.message ?: "Job started successfully"
         } catch (error: Throwable) {
             val status = if (error is IOException) "Pending Sync" else "Sync Failed"
-            dao.upsertReport(localStart.copy(syncStatus = status, syncError = readableError(error)))
-            throw IllegalStateException(readableError(error), error)
+            val errorText = readableError(error)
+            val failed = if (error is IOException) {
+                localStart.copy(syncStatus = status, syncError = errorText)
+            } else {
+                report.copy(syncStatus = status, syncError = errorText)
+            }
+            dao.upsertReport(failed)
+            throw IllegalStateException(errorText, error)
         }
     }
 
@@ -164,8 +190,14 @@ class ServiceRepository(context: Context) {
             response.message ?: "Job stopped successfully"
         } catch (error: Throwable) {
             val status = if (error is IOException) "Pending Sync" else "Sync Failed"
-            dao.upsertReport(localStop.copy(syncStatus = status, syncError = readableError(error)))
-            throw IllegalStateException(readableError(error), error)
+            val errorText = readableError(error)
+            val failed = if (error is IOException) {
+                localStop.copy(syncStatus = status, syncError = errorText)
+            } else {
+                report.copy(syncStatus = status, syncError = errorText)
+            }
+            dao.upsertReport(failed)
+            throw IllegalStateException(errorText, error)
         }
     }
 
@@ -376,18 +408,27 @@ class ServiceRepository(context: Context) {
             Log.d(TAG, "$label response: $result")
             result
         } catch (error: Throwable) {
-            Log.e(TAG, "$label failed: ${readableError(error)}", error)
-            throw error
+            val message = readableError(error)
+            Log.e(TAG, "$label failed: $message", error)
+            if (error is IOException) {
+                throw error
+            }
+            throw IllegalStateException(message, error)
         }
     }
 
     private fun readableError(error: Throwable): String {
         if (error is HttpException) {
-            val body = error.response()?.errorBody()?.string()
-            val odooError = body?.let {
-                runCatching { JSONObject(it).optString("error") }.getOrNull()
-            }.orEmpty()
-            return odooError.ifBlank { "Odoo endpoint returned ${error.code()}" }
+            val body = error.response()?.errorBody()?.string().orEmpty()
+            val odooError = runCatching {
+                val json = JSONObject(body)
+                json.optString("error")
+                    .ifBlank { json.optString("message") }
+                    .ifBlank { json.optJSONObject("data")?.optString("message").orEmpty() }
+            }.getOrDefault("")
+            return odooError
+                .ifBlank { body.trim().take(500) }
+                .ifBlank { "Odoo endpoint returned ${error.code()}" }
         }
         return error.message ?: "Server unavailable"
     }
@@ -395,8 +436,17 @@ class ServiceRepository(context: Context) {
     private fun mobileExternalId(): String =
         "${prefs.getString("device_id", UUID.randomUUID().toString())}-${UUID.randomUUID()}"
 
-    private fun bearer() = "Bearer ${prefs.getString("token", "")}"
-    private fun api() = ApiFactory.create(prefs.getString("base_url", "") ?: "")
+    private fun bearer(): String {
+        val token = prefs.getString("token", "").orEmpty()
+        require(token.isNotBlank()) { "Log in before syncing Jobs." }
+        return "Bearer $token"
+    }
+
+    private fun api(): com.tanjo.servicereports.data.remote.MobileApi {
+        val baseUrl = prefs.getString("base_url", "").orEmpty()
+        require(baseUrl.isNotBlank()) { "Log in before syncing Jobs." }
+        return ApiFactory.create(baseUrl)
+    }
 
     private fun Any?.asLongOrNull(): Long? = when (this) {
         is Number -> toLong()

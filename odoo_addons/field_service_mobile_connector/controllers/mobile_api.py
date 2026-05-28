@@ -81,16 +81,23 @@ class FieldServiceMobileApi(http.Controller):
     def jobs(self):
         try:
             env = self._user_env()
-            return self._json({"success": True, "jobs": [self._job_payload(job) for job in self._assigned_jobs(env)]})
+            jobs = [self._job_payload(job, env) for job in self._assigned_jobs(env)]
+            return self._json(
+                {
+                    "success": True,
+                    "jobs": jobs,
+                    "message": "No assigned Jobs found for this technician." if not jobs else "",
+                }
+            )
         except Exception as exc:
-            return self._failure(exc, status=500)
+            return self._failure(exc, status=401 if isinstance(exc, AccessError) else 500)
 
     @http.route("/api/mobile/jobs/<int:job_id>", type="http", auth="none", methods=["GET"], csrf=False)
     def job_detail(self, job_id):
         try:
             env = self._user_env()
             job = self._assigned_job(env, job_id)
-            payload = self._job_payload(job)
+            payload = self._job_payload(job, env)
             report = self._report_for_job(env, job)
             payload["report"] = self._report_payload(report, full=True) if report else None
             return self._success(payload)
@@ -214,6 +221,14 @@ class FieldServiceMobileApi(http.Controller):
                 raise UserError("Service report not found.")
             if report.driver_id != env.user:
                 raise AccessError("Access denied for technician.")
+            if report.state in ("submitted", "approved", "quotation_created"):
+                return self._success(
+                    {
+                        "report": self._report_payload(report, full=True),
+                        "sync_status": "synced",
+                        "message": "Service report is already submitted for backend review.",
+                    }
+                )
             data = self._body()
             if data:
                 report = self._upsert_report(env, data, report=report)
@@ -395,6 +410,13 @@ class FieldServiceMobileApi(http.Controller):
         if not report and data.get("job_id"):
             job = self._assigned_job(env, data["job_id"])
             report = self._report_for_job(env, job)
+        if report and report.state in ("submitted", "approved", "quotation_created"):
+            if data.get("submit"):
+                return report
+            raise UserError(
+                "Submitted reports cannot be edited by technicians. "
+                "Ask a reviewer to send it back for correction."
+            )
         values = self._report_values(env, data)
         if "parts" in data or "lines" in data:
             lines = data.get("parts") if "parts" in data else data.get("lines")
@@ -481,11 +503,11 @@ class FieldServiceMobileApi(http.Controller):
             "notes": line.get("notes"),
         }
 
-    def _job_payload(self, job):
+    def _job_payload(self, job, env=None):
         partner = job.partner_id if job.partner_id else False
         company = (partner.parent_id or partner) if partner else False
         contact = partner if partner and partner != company else False
-        report = self._report_for_job(job.env, job)
+        report = self._report_for_job(env or job.env, job)
         return {
             "id": job.id,
             "job_number": job.display_name or job.name or f"Job #{job.id}",

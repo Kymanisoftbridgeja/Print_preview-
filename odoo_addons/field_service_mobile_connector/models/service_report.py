@@ -2,7 +2,7 @@ import secrets
 from datetime import timedelta
 
 from odoo import _, api, fields, models
-from odoo.exceptions import AccessError
+from odoo.exceptions import AccessError, UserError
 
 
 class FieldServiceMobileToken(models.Model):
@@ -55,11 +55,31 @@ class FieldServiceRoadReport(models.Model):
         )
     ]
 
+    def _check_write_allowed(self, vals):
+        if self.env.context.get("service_report_skip_lock"):
+            return
+        if self.env.user.has_group("field_service_road_reports.group_service_report_manager"):
+            return
+        allowed_submitted_write = set(vals) <= {"state"} and vals.get("state") == "submitted"
+        if allowed_submitted_write:
+            return
+        editable_states = ("draft", "assigned", "in_progress", "completed", "rejected")
+        locked = self.filtered(lambda report: report.state not in editable_states)
+        if locked:
+            raise UserError(
+                _(
+                    "Submitted reports cannot be edited by technicians. "
+                    "Ask a reviewer to send it back for correction."
+                )
+            )
+
 
 class FieldServiceRoadReportLine(models.Model):
     _inherit = "field.service.road.report.line"
 
     def _check_report_editable(self):
+        if self.env.context.get("service_report_skip_lock"):
+            return
         if self.env.user.has_group("field_service_road_reports.group_service_report_manager"):
             return
         editable_states = ("draft", "assigned", "in_progress", "completed", "rejected")

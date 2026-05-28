@@ -21,9 +21,16 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalCoroutinesApi::class)
 class ServiceReportViewModel(app: Application) : AndroidViewModel(app) {
     private val repository = ServiceRepository(app)
+    val connectionDefaults = repository.connectionDefaults
     val jobs = repository.jobs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val selectedReportId = MutableStateFlow<String?>(null)
     val message = MutableStateFlow("")
+
+    init {
+        if (repository.hasSavedSession()) {
+            refresh()
+        }
+    }
 
     val selectedReport: StateFlow<ServiceReportEntity?> = selectedReportId.flatMapLatest {
         if (it == null) flowOf(null) else repository.observeReport(it)
@@ -35,13 +42,13 @@ class ServiceReportViewModel(app: Application) : AndroidViewModel(app) {
 
     fun login(baseUrl: String, db: String, login: String, password: String) = viewModelScope.launch {
         runCatching { repository.login(baseUrl, db, login, password) }
-            .onSuccess { message.value = "Jobs synced" }
+            .onSuccess { message.value = it }
             .onFailure { message.value = it.message ?: "Login failed" }
     }
 
     fun refresh() = viewModelScope.launch {
         runCatching { repository.refreshJobs() }
-            .onSuccess { message.value = "Jobs refreshed" }
+            .onSuccess { message.value = it }
             .onFailure { message.value = it.message ?: "Offline: showing saved Jobs" }
     }
 

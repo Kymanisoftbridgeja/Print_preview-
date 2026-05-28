@@ -63,7 +63,12 @@ data class LoginResponse(
     val user: UserDto
 )
 data class UserDto(val id: Long, val name: String, val login: String)
-data class JobsResponse(val success: Boolean? = null, val error: String? = null, val jobs: List<JobDto> = emptyList())
+data class JobsResponse(
+    val success: Boolean? = null,
+    val error: String? = null,
+    val message: String? = null,
+    val jobs: List<JobDto> = emptyList()
+)
 data class JobDto(
     val id: Any?,
     @Json(name = "job_number") val jobNumber: String,
