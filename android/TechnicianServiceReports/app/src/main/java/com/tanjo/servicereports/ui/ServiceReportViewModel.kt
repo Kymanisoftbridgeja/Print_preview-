@@ -42,11 +42,16 @@ class ServiceReportViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() = viewModelScope.launch {
         runCatching { repository.refreshJobs() }
             .onSuccess { message.value = "Jobs refreshed" }
-            .onFailure { message.value = "Offline: showing saved Jobs" }
+            .onFailure { message.value = it.message ?: "Offline: showing saved Jobs" }
     }
 
     fun openJob(job: JobEntity) = viewModelScope.launch {
-        selectedReportId.value = repository.reportForJob(job).localId
+        runCatching { repository.reportForJob(job) }
+            .onSuccess {
+                selectedReportId.value = it.localId
+                if (it.syncError.isNotBlank()) message.value = it.syncError
+            }
+            .onFailure { message.value = it.message ?: "Could not open service report" }
     }
 
     fun newEmergencyReport() = viewModelScope.launch {
@@ -55,26 +60,50 @@ class ServiceReportViewModel(app: Application) : AndroidViewModel(app) {
 
     fun save(report: ServiceReportEntity) = viewModelScope.launch {
         repository.saveReport(report.copy(syncStatus = "Local Draft"))
+        message.value = "Draft saved locally"
     }
 
     fun start(report: ServiceReportEntity) = viewModelScope.launch {
-        repository.startJob(report)
-        SyncWorker.enqueue(getApplication())
+        runCatching { repository.startJob(report) }
+            .onSuccess { message.value = it }
+            .onFailure {
+                message.value = it.message ?: "Start sync failed"
+                SyncWorker.enqueue(getApplication())
+            }
     }
 
     fun stop(report: ServiceReportEntity) = viewModelScope.launch {
-        repository.stopJob(report)
-        SyncWorker.enqueue(getApplication())
+        runCatching { repository.stopJob(report) }
+            .onSuccess { message.value = it }
+            .onFailure {
+                message.value = it.message ?: "Stop sync failed"
+                SyncWorker.enqueue(getApplication())
+            }
     }
 
     fun submit(report: ServiceReportEntity) = viewModelScope.launch {
-        repository.markPendingSubmit(report)
-        SyncWorker.enqueue(getApplication())
-        message.value = "Report queued for sync"
+        runCatching { repository.submitReport(report) }
+            .onSuccess { message.value = it }
+            .onFailure {
+                message.value = it.message ?: "Report queued for sync"
+                SyncWorker.enqueue(getApplication())
+            }
     }
 
-    fun addPart(reportId: String, partName: String, quantity: Double) = viewModelScope.launch {
-        repository.savePart(PartEntity(reportLocalId = reportId, partName = partName, quantity = quantity))
+    fun addPart(reportId: String, partName: String, serialNumber: String, quantity: Double, invoiceable: Boolean) = viewModelScope.launch {
+        repository.savePart(
+            PartEntity(
+                reportLocalId = reportId,
+                partName = partName,
+                serialNumber = serialNumber,
+                quantity = quantity,
+                invoiceable = invoiceable
+            )
+        )
+    }
+
+    fun removePart(partId: String) = viewModelScope.launch {
+        repository.removePart(partId)
     }
 
     fun addPhoto(reportId: String, uri: String) = viewModelScope.launch {
@@ -84,6 +113,6 @@ class ServiceReportViewModel(app: Application) : AndroidViewModel(app) {
     fun syncNow() = viewModelScope.launch {
         runCatching { repository.syncPending() }
             .onSuccess { message.value = "Pending reports synced" }
-            .onFailure { message.value = "Sync failed; reports are still saved locally" }
+            .onFailure { message.value = it.message ?: "Sync failed; reports are still saved locally" }
     }
 }

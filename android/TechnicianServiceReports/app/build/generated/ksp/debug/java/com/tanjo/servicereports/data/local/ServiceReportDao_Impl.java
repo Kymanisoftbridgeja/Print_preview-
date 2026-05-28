@@ -10,6 +10,7 @@ import androidx.room.EntityInsertionAdapter;
 import androidx.room.EntityUpsertionAdapter;
 import androidx.room.RoomDatabase;
 import androidx.room.RoomSQLiteQuery;
+import androidx.room.SharedSQLiteStatement;
 import androidx.room.util.CursorUtil;
 import androidx.room.util.DBUtil;
 import androidx.sqlite.db.SupportSQLiteStatement;
@@ -34,6 +35,10 @@ import kotlinx.coroutines.flow.Flow;
 public final class ServiceReportDao_Impl implements ServiceReportDao {
   private final RoomDatabase __db;
 
+  private final SharedSQLiteStatement __preparedStmtOfDeletePartsForReport;
+
+  private final SharedSQLiteStatement __preparedStmtOfDeletePart;
+
   private final EntityUpsertionAdapter<JobEntity> __upsertionAdapterOfJobEntity;
 
   private final EntityUpsertionAdapter<ServiceReportEntity> __upsertionAdapterOfServiceReportEntity;
@@ -44,6 +49,22 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
 
   public ServiceReportDao_Impl(@NonNull final RoomDatabase __db) {
     this.__db = __db;
+    this.__preparedStmtOfDeletePartsForReport = new SharedSQLiteStatement(__db) {
+      @Override
+      @NonNull
+      public String createQuery() {
+        final String _query = "delete from parts where reportLocalId = ?";
+        return _query;
+      }
+    };
+    this.__preparedStmtOfDeletePart = new SharedSQLiteStatement(__db) {
+      @Override
+      @NonNull
+      public String createQuery() {
+        final String _query = "delete from parts where id = ?";
+        return _query;
+      }
+    };
     this.__upsertionAdapterOfJobEntity = new EntityUpsertionAdapter<JobEntity>(new EntityInsertionAdapter<JobEntity>(__db) {
       @Override
       @NonNull
@@ -104,7 +125,7 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
       @Override
       @NonNull
       protected String createQuery() {
-        return "INSERT INTO `service_reports` (`localId`,`odooId`,`mobileExternalId`,`jobId`,`reportNumber`,`customerId`,`customerName`,`companyName`,`contactName`,`address`,`serviceDate`,`arrivalTime`,`departureTime`,`laborHours`,`vehicle`,`poReference`,`serviceType`,`originalReportNumber`,`make`,`model`,`kva`,`equipmentType`,`serialNumber`,`load`,`inputVoltage`,`outputVoltage`,`systemDown`,`batteryManufacturer`,`batteryType`,`batteryRating`,`batteryQuantity`,`problemReported`,`defectsFound`,`correctiveAction`,`recommendations`,`statusOfService`,`customerSignaturePath`,`technicianSignaturePath`,`technicianName`,`signatureDateTime`,`state`,`syncStatus`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        return "INSERT INTO `service_reports` (`localId`,`odooId`,`mobileExternalId`,`jobId`,`reportNumber`,`customerId`,`customerName`,`companyName`,`contactName`,`address`,`serviceDate`,`arrivalTime`,`departureTime`,`laborHours`,`vehicle`,`poReference`,`serviceType`,`originalReportNumber`,`make`,`model`,`kva`,`equipmentType`,`serialNumber`,`load`,`inputVoltage`,`outputVoltage`,`systemDown`,`batteryManufacturer`,`batteryType`,`batteryRating`,`batteryQuantity`,`problemReported`,`defectsFound`,`correctiveAction`,`recommendations`,`techniciansOnSite`,`statusOfService`,`customerSignaturePath`,`technicianSignaturePath`,`technicianName`,`signatureDateTime`,`state`,`syncStatus`,`syncError`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
       }
 
       @Override
@@ -158,19 +179,21 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
         statement.bindString(33, entity.getDefectsFound());
         statement.bindString(34, entity.getCorrectiveAction());
         statement.bindString(35, entity.getRecommendations());
-        statement.bindString(36, entity.getStatusOfService());
-        statement.bindString(37, entity.getCustomerSignaturePath());
-        statement.bindString(38, entity.getTechnicianSignaturePath());
-        statement.bindString(39, entity.getTechnicianName());
-        statement.bindString(40, entity.getSignatureDateTime());
-        statement.bindString(41, entity.getState());
-        statement.bindString(42, entity.getSyncStatus());
+        statement.bindString(36, entity.getTechniciansOnSite());
+        statement.bindString(37, entity.getStatusOfService());
+        statement.bindString(38, entity.getCustomerSignaturePath());
+        statement.bindString(39, entity.getTechnicianSignaturePath());
+        statement.bindString(40, entity.getTechnicianName());
+        statement.bindString(41, entity.getSignatureDateTime());
+        statement.bindString(42, entity.getState());
+        statement.bindString(43, entity.getSyncStatus());
+        statement.bindString(44, entity.getSyncError());
       }
     }, new EntityDeletionOrUpdateAdapter<ServiceReportEntity>(__db) {
       @Override
       @NonNull
       protected String createQuery() {
-        return "UPDATE `service_reports` SET `localId` = ?,`odooId` = ?,`mobileExternalId` = ?,`jobId` = ?,`reportNumber` = ?,`customerId` = ?,`customerName` = ?,`companyName` = ?,`contactName` = ?,`address` = ?,`serviceDate` = ?,`arrivalTime` = ?,`departureTime` = ?,`laborHours` = ?,`vehicle` = ?,`poReference` = ?,`serviceType` = ?,`originalReportNumber` = ?,`make` = ?,`model` = ?,`kva` = ?,`equipmentType` = ?,`serialNumber` = ?,`load` = ?,`inputVoltage` = ?,`outputVoltage` = ?,`systemDown` = ?,`batteryManufacturer` = ?,`batteryType` = ?,`batteryRating` = ?,`batteryQuantity` = ?,`problemReported` = ?,`defectsFound` = ?,`correctiveAction` = ?,`recommendations` = ?,`statusOfService` = ?,`customerSignaturePath` = ?,`technicianSignaturePath` = ?,`technicianName` = ?,`signatureDateTime` = ?,`state` = ?,`syncStatus` = ? WHERE `localId` = ?";
+        return "UPDATE `service_reports` SET `localId` = ?,`odooId` = ?,`mobileExternalId` = ?,`jobId` = ?,`reportNumber` = ?,`customerId` = ?,`customerName` = ?,`companyName` = ?,`contactName` = ?,`address` = ?,`serviceDate` = ?,`arrivalTime` = ?,`departureTime` = ?,`laborHours` = ?,`vehicle` = ?,`poReference` = ?,`serviceType` = ?,`originalReportNumber` = ?,`make` = ?,`model` = ?,`kva` = ?,`equipmentType` = ?,`serialNumber` = ?,`load` = ?,`inputVoltage` = ?,`outputVoltage` = ?,`systemDown` = ?,`batteryManufacturer` = ?,`batteryType` = ?,`batteryRating` = ?,`batteryQuantity` = ?,`problemReported` = ?,`defectsFound` = ?,`correctiveAction` = ?,`recommendations` = ?,`techniciansOnSite` = ?,`statusOfService` = ?,`customerSignaturePath` = ?,`technicianSignaturePath` = ?,`technicianName` = ?,`signatureDateTime` = ?,`state` = ?,`syncStatus` = ?,`syncError` = ? WHERE `localId` = ?";
       }
 
       @Override
@@ -224,14 +247,16 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
         statement.bindString(33, entity.getDefectsFound());
         statement.bindString(34, entity.getCorrectiveAction());
         statement.bindString(35, entity.getRecommendations());
-        statement.bindString(36, entity.getStatusOfService());
-        statement.bindString(37, entity.getCustomerSignaturePath());
-        statement.bindString(38, entity.getTechnicianSignaturePath());
-        statement.bindString(39, entity.getTechnicianName());
-        statement.bindString(40, entity.getSignatureDateTime());
-        statement.bindString(41, entity.getState());
-        statement.bindString(42, entity.getSyncStatus());
-        statement.bindString(43, entity.getLocalId());
+        statement.bindString(36, entity.getTechniciansOnSite());
+        statement.bindString(37, entity.getStatusOfService());
+        statement.bindString(38, entity.getCustomerSignaturePath());
+        statement.bindString(39, entity.getTechnicianSignaturePath());
+        statement.bindString(40, entity.getTechnicianName());
+        statement.bindString(41, entity.getSignatureDateTime());
+        statement.bindString(42, entity.getState());
+        statement.bindString(43, entity.getSyncStatus());
+        statement.bindString(44, entity.getSyncError());
+        statement.bindString(45, entity.getLocalId());
       }
     });
     this.__upsertionAdapterOfPartEntity = new EntityUpsertionAdapter<PartEntity>(new EntityInsertionAdapter<PartEntity>(__db) {
@@ -310,6 +335,57 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
         statement.bindString(6, entity.getId());
       }
     });
+  }
+
+  @Override
+  public Object deletePartsForReport(final String localId,
+      final Continuation<? super Unit> $completion) {
+    return CoroutinesRoom.execute(__db, true, new Callable<Unit>() {
+      @Override
+      @NonNull
+      public Unit call() throws Exception {
+        final SupportSQLiteStatement _stmt = __preparedStmtOfDeletePartsForReport.acquire();
+        int _argIndex = 1;
+        _stmt.bindString(_argIndex, localId);
+        try {
+          __db.beginTransaction();
+          try {
+            _stmt.executeUpdateDelete();
+            __db.setTransactionSuccessful();
+            return Unit.INSTANCE;
+          } finally {
+            __db.endTransaction();
+          }
+        } finally {
+          __preparedStmtOfDeletePartsForReport.release(_stmt);
+        }
+      }
+    }, $completion);
+  }
+
+  @Override
+  public Object deletePart(final String id, final Continuation<? super Unit> $completion) {
+    return CoroutinesRoom.execute(__db, true, new Callable<Unit>() {
+      @Override
+      @NonNull
+      public Unit call() throws Exception {
+        final SupportSQLiteStatement _stmt = __preparedStmtOfDeletePart.acquire();
+        int _argIndex = 1;
+        _stmt.bindString(_argIndex, id);
+        try {
+          __db.beginTransaction();
+          try {
+            _stmt.executeUpdateDelete();
+            __db.setTransactionSuccessful();
+            return Unit.INSTANCE;
+          } finally {
+            __db.endTransaction();
+          }
+        } finally {
+          __preparedStmtOfDeletePart.release(_stmt);
+        }
+      }
+    }, $completion);
   }
 
   @Override
@@ -503,6 +579,7 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
           final int _cursorIndexOfDefectsFound = CursorUtil.getColumnIndexOrThrow(_cursor, "defectsFound");
           final int _cursorIndexOfCorrectiveAction = CursorUtil.getColumnIndexOrThrow(_cursor, "correctiveAction");
           final int _cursorIndexOfRecommendations = CursorUtil.getColumnIndexOrThrow(_cursor, "recommendations");
+          final int _cursorIndexOfTechniciansOnSite = CursorUtil.getColumnIndexOrThrow(_cursor, "techniciansOnSite");
           final int _cursorIndexOfStatusOfService = CursorUtil.getColumnIndexOrThrow(_cursor, "statusOfService");
           final int _cursorIndexOfCustomerSignaturePath = CursorUtil.getColumnIndexOrThrow(_cursor, "customerSignaturePath");
           final int _cursorIndexOfTechnicianSignaturePath = CursorUtil.getColumnIndexOrThrow(_cursor, "technicianSignaturePath");
@@ -510,6 +587,7 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
           final int _cursorIndexOfSignatureDateTime = CursorUtil.getColumnIndexOrThrow(_cursor, "signatureDateTime");
           final int _cursorIndexOfState = CursorUtil.getColumnIndexOrThrow(_cursor, "state");
           final int _cursorIndexOfSyncStatus = CursorUtil.getColumnIndexOrThrow(_cursor, "syncStatus");
+          final int _cursorIndexOfSyncError = CursorUtil.getColumnIndexOrThrow(_cursor, "syncError");
           final ServiceReportEntity _result;
           if (_cursor.moveToFirst()) {
             final String _tmpLocalId;
@@ -596,6 +674,8 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
             _tmpCorrectiveAction = _cursor.getString(_cursorIndexOfCorrectiveAction);
             final String _tmpRecommendations;
             _tmpRecommendations = _cursor.getString(_cursorIndexOfRecommendations);
+            final String _tmpTechniciansOnSite;
+            _tmpTechniciansOnSite = _cursor.getString(_cursorIndexOfTechniciansOnSite);
             final String _tmpStatusOfService;
             _tmpStatusOfService = _cursor.getString(_cursorIndexOfStatusOfService);
             final String _tmpCustomerSignaturePath;
@@ -610,7 +690,9 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
             _tmpState = _cursor.getString(_cursorIndexOfState);
             final String _tmpSyncStatus;
             _tmpSyncStatus = _cursor.getString(_cursorIndexOfSyncStatus);
-            _result = new ServiceReportEntity(_tmpLocalId,_tmpOdooId,_tmpMobileExternalId,_tmpJobId,_tmpReportNumber,_tmpCustomerId,_tmpCustomerName,_tmpCompanyName,_tmpContactName,_tmpAddress,_tmpServiceDate,_tmpArrivalTime,_tmpDepartureTime,_tmpLaborHours,_tmpVehicle,_tmpPoReference,_tmpServiceType,_tmpOriginalReportNumber,_tmpMake,_tmpModel,_tmpKva,_tmpEquipmentType,_tmpSerialNumber,_tmpLoad,_tmpInputVoltage,_tmpOutputVoltage,_tmpSystemDown,_tmpBatteryManufacturer,_tmpBatteryType,_tmpBatteryRating,_tmpBatteryQuantity,_tmpProblemReported,_tmpDefectsFound,_tmpCorrectiveAction,_tmpRecommendations,_tmpStatusOfService,_tmpCustomerSignaturePath,_tmpTechnicianSignaturePath,_tmpTechnicianName,_tmpSignatureDateTime,_tmpState,_tmpSyncStatus);
+            final String _tmpSyncError;
+            _tmpSyncError = _cursor.getString(_cursorIndexOfSyncError);
+            _result = new ServiceReportEntity(_tmpLocalId,_tmpOdooId,_tmpMobileExternalId,_tmpJobId,_tmpReportNumber,_tmpCustomerId,_tmpCustomerName,_tmpCompanyName,_tmpContactName,_tmpAddress,_tmpServiceDate,_tmpArrivalTime,_tmpDepartureTime,_tmpLaborHours,_tmpVehicle,_tmpPoReference,_tmpServiceType,_tmpOriginalReportNumber,_tmpMake,_tmpModel,_tmpKva,_tmpEquipmentType,_tmpSerialNumber,_tmpLoad,_tmpInputVoltage,_tmpOutputVoltage,_tmpSystemDown,_tmpBatteryManufacturer,_tmpBatteryType,_tmpBatteryRating,_tmpBatteryQuantity,_tmpProblemReported,_tmpDefectsFound,_tmpCorrectiveAction,_tmpRecommendations,_tmpTechniciansOnSite,_tmpStatusOfService,_tmpCustomerSignaturePath,_tmpTechnicianSignaturePath,_tmpTechnicianName,_tmpSignatureDateTime,_tmpState,_tmpSyncStatus,_tmpSyncError);
           } else {
             _result = null;
           }
@@ -676,6 +758,7 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
           final int _cursorIndexOfDefectsFound = CursorUtil.getColumnIndexOrThrow(_cursor, "defectsFound");
           final int _cursorIndexOfCorrectiveAction = CursorUtil.getColumnIndexOrThrow(_cursor, "correctiveAction");
           final int _cursorIndexOfRecommendations = CursorUtil.getColumnIndexOrThrow(_cursor, "recommendations");
+          final int _cursorIndexOfTechniciansOnSite = CursorUtil.getColumnIndexOrThrow(_cursor, "techniciansOnSite");
           final int _cursorIndexOfStatusOfService = CursorUtil.getColumnIndexOrThrow(_cursor, "statusOfService");
           final int _cursorIndexOfCustomerSignaturePath = CursorUtil.getColumnIndexOrThrow(_cursor, "customerSignaturePath");
           final int _cursorIndexOfTechnicianSignaturePath = CursorUtil.getColumnIndexOrThrow(_cursor, "technicianSignaturePath");
@@ -683,6 +766,7 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
           final int _cursorIndexOfSignatureDateTime = CursorUtil.getColumnIndexOrThrow(_cursor, "signatureDateTime");
           final int _cursorIndexOfState = CursorUtil.getColumnIndexOrThrow(_cursor, "state");
           final int _cursorIndexOfSyncStatus = CursorUtil.getColumnIndexOrThrow(_cursor, "syncStatus");
+          final int _cursorIndexOfSyncError = CursorUtil.getColumnIndexOrThrow(_cursor, "syncError");
           final ServiceReportEntity _result;
           if (_cursor.moveToFirst()) {
             final String _tmpLocalId;
@@ -769,6 +853,8 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
             _tmpCorrectiveAction = _cursor.getString(_cursorIndexOfCorrectiveAction);
             final String _tmpRecommendations;
             _tmpRecommendations = _cursor.getString(_cursorIndexOfRecommendations);
+            final String _tmpTechniciansOnSite;
+            _tmpTechniciansOnSite = _cursor.getString(_cursorIndexOfTechniciansOnSite);
             final String _tmpStatusOfService;
             _tmpStatusOfService = _cursor.getString(_cursorIndexOfStatusOfService);
             final String _tmpCustomerSignaturePath;
@@ -783,7 +869,9 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
             _tmpState = _cursor.getString(_cursorIndexOfState);
             final String _tmpSyncStatus;
             _tmpSyncStatus = _cursor.getString(_cursorIndexOfSyncStatus);
-            _result = new ServiceReportEntity(_tmpLocalId,_tmpOdooId,_tmpMobileExternalId,_tmpJobId,_tmpReportNumber,_tmpCustomerId,_tmpCustomerName,_tmpCompanyName,_tmpContactName,_tmpAddress,_tmpServiceDate,_tmpArrivalTime,_tmpDepartureTime,_tmpLaborHours,_tmpVehicle,_tmpPoReference,_tmpServiceType,_tmpOriginalReportNumber,_tmpMake,_tmpModel,_tmpKva,_tmpEquipmentType,_tmpSerialNumber,_tmpLoad,_tmpInputVoltage,_tmpOutputVoltage,_tmpSystemDown,_tmpBatteryManufacturer,_tmpBatteryType,_tmpBatteryRating,_tmpBatteryQuantity,_tmpProblemReported,_tmpDefectsFound,_tmpCorrectiveAction,_tmpRecommendations,_tmpStatusOfService,_tmpCustomerSignaturePath,_tmpTechnicianSignaturePath,_tmpTechnicianName,_tmpSignatureDateTime,_tmpState,_tmpSyncStatus);
+            final String _tmpSyncError;
+            _tmpSyncError = _cursor.getString(_cursorIndexOfSyncError);
+            _result = new ServiceReportEntity(_tmpLocalId,_tmpOdooId,_tmpMobileExternalId,_tmpJobId,_tmpReportNumber,_tmpCustomerId,_tmpCustomerName,_tmpCompanyName,_tmpContactName,_tmpAddress,_tmpServiceDate,_tmpArrivalTime,_tmpDepartureTime,_tmpLaborHours,_tmpVehicle,_tmpPoReference,_tmpServiceType,_tmpOriginalReportNumber,_tmpMake,_tmpModel,_tmpKva,_tmpEquipmentType,_tmpSerialNumber,_tmpLoad,_tmpInputVoltage,_tmpOutputVoltage,_tmpSystemDown,_tmpBatteryManufacturer,_tmpBatteryType,_tmpBatteryRating,_tmpBatteryQuantity,_tmpProblemReported,_tmpDefectsFound,_tmpCorrectiveAction,_tmpRecommendations,_tmpTechniciansOnSite,_tmpStatusOfService,_tmpCustomerSignaturePath,_tmpTechnicianSignaturePath,_tmpTechnicianName,_tmpSignatureDateTime,_tmpState,_tmpSyncStatus,_tmpSyncError);
           } else {
             _result = null;
           }
@@ -842,6 +930,7 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
           final int _cursorIndexOfDefectsFound = CursorUtil.getColumnIndexOrThrow(_cursor, "defectsFound");
           final int _cursorIndexOfCorrectiveAction = CursorUtil.getColumnIndexOrThrow(_cursor, "correctiveAction");
           final int _cursorIndexOfRecommendations = CursorUtil.getColumnIndexOrThrow(_cursor, "recommendations");
+          final int _cursorIndexOfTechniciansOnSite = CursorUtil.getColumnIndexOrThrow(_cursor, "techniciansOnSite");
           final int _cursorIndexOfStatusOfService = CursorUtil.getColumnIndexOrThrow(_cursor, "statusOfService");
           final int _cursorIndexOfCustomerSignaturePath = CursorUtil.getColumnIndexOrThrow(_cursor, "customerSignaturePath");
           final int _cursorIndexOfTechnicianSignaturePath = CursorUtil.getColumnIndexOrThrow(_cursor, "technicianSignaturePath");
@@ -849,6 +938,7 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
           final int _cursorIndexOfSignatureDateTime = CursorUtil.getColumnIndexOrThrow(_cursor, "signatureDateTime");
           final int _cursorIndexOfState = CursorUtil.getColumnIndexOrThrow(_cursor, "state");
           final int _cursorIndexOfSyncStatus = CursorUtil.getColumnIndexOrThrow(_cursor, "syncStatus");
+          final int _cursorIndexOfSyncError = CursorUtil.getColumnIndexOrThrow(_cursor, "syncError");
           final List<ServiceReportEntity> _result = new ArrayList<ServiceReportEntity>(_cursor.getCount());
           while (_cursor.moveToNext()) {
             final ServiceReportEntity _item;
@@ -936,6 +1026,8 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
             _tmpCorrectiveAction = _cursor.getString(_cursorIndexOfCorrectiveAction);
             final String _tmpRecommendations;
             _tmpRecommendations = _cursor.getString(_cursorIndexOfRecommendations);
+            final String _tmpTechniciansOnSite;
+            _tmpTechniciansOnSite = _cursor.getString(_cursorIndexOfTechniciansOnSite);
             final String _tmpStatusOfService;
             _tmpStatusOfService = _cursor.getString(_cursorIndexOfStatusOfService);
             final String _tmpCustomerSignaturePath;
@@ -950,7 +1042,9 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
             _tmpState = _cursor.getString(_cursorIndexOfState);
             final String _tmpSyncStatus;
             _tmpSyncStatus = _cursor.getString(_cursorIndexOfSyncStatus);
-            _item = new ServiceReportEntity(_tmpLocalId,_tmpOdooId,_tmpMobileExternalId,_tmpJobId,_tmpReportNumber,_tmpCustomerId,_tmpCustomerName,_tmpCompanyName,_tmpContactName,_tmpAddress,_tmpServiceDate,_tmpArrivalTime,_tmpDepartureTime,_tmpLaborHours,_tmpVehicle,_tmpPoReference,_tmpServiceType,_tmpOriginalReportNumber,_tmpMake,_tmpModel,_tmpKva,_tmpEquipmentType,_tmpSerialNumber,_tmpLoad,_tmpInputVoltage,_tmpOutputVoltage,_tmpSystemDown,_tmpBatteryManufacturer,_tmpBatteryType,_tmpBatteryRating,_tmpBatteryQuantity,_tmpProblemReported,_tmpDefectsFound,_tmpCorrectiveAction,_tmpRecommendations,_tmpStatusOfService,_tmpCustomerSignaturePath,_tmpTechnicianSignaturePath,_tmpTechnicianName,_tmpSignatureDateTime,_tmpState,_tmpSyncStatus);
+            final String _tmpSyncError;
+            _tmpSyncError = _cursor.getString(_cursorIndexOfSyncError);
+            _item = new ServiceReportEntity(_tmpLocalId,_tmpOdooId,_tmpMobileExternalId,_tmpJobId,_tmpReportNumber,_tmpCustomerId,_tmpCustomerName,_tmpCompanyName,_tmpContactName,_tmpAddress,_tmpServiceDate,_tmpArrivalTime,_tmpDepartureTime,_tmpLaborHours,_tmpVehicle,_tmpPoReference,_tmpServiceType,_tmpOriginalReportNumber,_tmpMake,_tmpModel,_tmpKva,_tmpEquipmentType,_tmpSerialNumber,_tmpLoad,_tmpInputVoltage,_tmpOutputVoltage,_tmpSystemDown,_tmpBatteryManufacturer,_tmpBatteryType,_tmpBatteryRating,_tmpBatteryQuantity,_tmpProblemReported,_tmpDefectsFound,_tmpCorrectiveAction,_tmpRecommendations,_tmpTechniciansOnSite,_tmpStatusOfService,_tmpCustomerSignaturePath,_tmpTechnicianSignaturePath,_tmpTechnicianName,_tmpSignatureDateTime,_tmpState,_tmpSyncStatus,_tmpSyncError);
             _result.add(_item);
           }
           return _result;

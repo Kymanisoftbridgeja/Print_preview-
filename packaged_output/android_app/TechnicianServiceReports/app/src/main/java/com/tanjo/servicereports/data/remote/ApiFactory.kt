@@ -10,7 +10,7 @@ import retrofit2.converter.moshi.MoshiConverterFactory
 object ApiFactory {
     fun create(baseUrl: String): MobileApi {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
+            level = HttpLoggingInterceptor.Level.BODY
         }
         val client = OkHttpClient.Builder().addInterceptor(logging).build()
         val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()

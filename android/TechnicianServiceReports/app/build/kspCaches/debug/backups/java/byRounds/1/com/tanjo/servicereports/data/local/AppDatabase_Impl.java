@@ -31,15 +31,15 @@ public final class AppDatabase_Impl extends AppDatabase {
   @Override
   @NonNull
   protected SupportSQLiteOpenHelper createOpenHelper(@NonNull final DatabaseConfiguration config) {
-    final SupportSQLiteOpenHelper.Callback _openCallback = new RoomOpenHelper(config, new RoomOpenHelper.Delegate(1) {
+    final SupportSQLiteOpenHelper.Callback _openCallback = new RoomOpenHelper(config, new RoomOpenHelper.Delegate(2) {
       @Override
       public void createAllTables(@NonNull final SupportSQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS `jobs` (`id` INTEGER NOT NULL, `jobNumber` TEXT NOT NULL, `customerId` INTEGER, `companyName` TEXT NOT NULL, `contactName` TEXT NOT NULL, `address` TEXT NOT NULL, `scheduledDate` TEXT NOT NULL, `serviceType` TEXT NOT NULL, `jobStatus` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, `reportStatus` TEXT NOT NULL, `description` TEXT NOT NULL, PRIMARY KEY(`id`))");
-        db.execSQL("CREATE TABLE IF NOT EXISTS `service_reports` (`localId` TEXT NOT NULL, `odooId` INTEGER, `mobileExternalId` TEXT NOT NULL, `jobId` INTEGER, `reportNumber` TEXT NOT NULL, `customerId` INTEGER, `customerName` TEXT NOT NULL, `companyName` TEXT NOT NULL, `contactName` TEXT NOT NULL, `address` TEXT NOT NULL, `serviceDate` TEXT NOT NULL, `arrivalTime` TEXT NOT NULL, `departureTime` TEXT NOT NULL, `laborHours` REAL NOT NULL, `vehicle` TEXT NOT NULL, `poReference` TEXT NOT NULL, `serviceType` TEXT NOT NULL, `originalReportNumber` TEXT NOT NULL, `make` TEXT NOT NULL, `model` TEXT NOT NULL, `kva` TEXT NOT NULL, `equipmentType` TEXT NOT NULL, `serialNumber` TEXT NOT NULL, `load` TEXT NOT NULL, `inputVoltage` TEXT NOT NULL, `outputVoltage` TEXT NOT NULL, `systemDown` INTEGER NOT NULL, `batteryManufacturer` TEXT NOT NULL, `batteryType` TEXT NOT NULL, `batteryRating` TEXT NOT NULL, `batteryQuantity` INTEGER NOT NULL, `problemReported` TEXT NOT NULL, `defectsFound` TEXT NOT NULL, `correctiveAction` TEXT NOT NULL, `recommendations` TEXT NOT NULL, `statusOfService` TEXT NOT NULL, `customerSignaturePath` TEXT NOT NULL, `technicianSignaturePath` TEXT NOT NULL, `technicianName` TEXT NOT NULL, `signatureDateTime` TEXT NOT NULL, `state` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`localId`))");
+        db.execSQL("CREATE TABLE IF NOT EXISTS `service_reports` (`localId` TEXT NOT NULL, `odooId` INTEGER, `mobileExternalId` TEXT NOT NULL, `jobId` INTEGER, `reportNumber` TEXT NOT NULL, `customerId` INTEGER, `customerName` TEXT NOT NULL, `companyName` TEXT NOT NULL, `contactName` TEXT NOT NULL, `address` TEXT NOT NULL, `serviceDate` TEXT NOT NULL, `arrivalTime` TEXT NOT NULL, `departureTime` TEXT NOT NULL, `laborHours` REAL NOT NULL, `vehicle` TEXT NOT NULL, `poReference` TEXT NOT NULL, `serviceType` TEXT NOT NULL, `originalReportNumber` TEXT NOT NULL, `make` TEXT NOT NULL, `model` TEXT NOT NULL, `kva` TEXT NOT NULL, `equipmentType` TEXT NOT NULL, `serialNumber` TEXT NOT NULL, `load` TEXT NOT NULL, `inputVoltage` TEXT NOT NULL, `outputVoltage` TEXT NOT NULL, `systemDown` INTEGER NOT NULL, `batteryManufacturer` TEXT NOT NULL, `batteryType` TEXT NOT NULL, `batteryRating` TEXT NOT NULL, `batteryQuantity` INTEGER NOT NULL, `problemReported` TEXT NOT NULL, `defectsFound` TEXT NOT NULL, `correctiveAction` TEXT NOT NULL, `recommendations` TEXT NOT NULL, `techniciansOnSite` TEXT NOT NULL, `statusOfService` TEXT NOT NULL, `customerSignaturePath` TEXT NOT NULL, `technicianSignaturePath` TEXT NOT NULL, `technicianName` TEXT NOT NULL, `signatureDateTime` TEXT NOT NULL, `state` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, `syncError` TEXT NOT NULL, PRIMARY KEY(`localId`))");
         db.execSQL("CREATE TABLE IF NOT EXISTS `parts` (`id` TEXT NOT NULL, `reportLocalId` TEXT NOT NULL, `partName` TEXT NOT NULL, `serialNumber` TEXT NOT NULL, `quantity` REAL NOT NULL, `conditionType` TEXT NOT NULL, `invoiceable` INTEGER NOT NULL, `notes` TEXT NOT NULL, PRIMARY KEY(`id`))");
         db.execSQL("CREATE TABLE IF NOT EXISTS `attachments` (`id` TEXT NOT NULL, `reportLocalId` TEXT NOT NULL, `filePath` TEXT NOT NULL, `mimeType` TEXT NOT NULL, `category` TEXT NOT NULL, PRIMARY KEY(`id`))");
         db.execSQL("CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)");
-        db.execSQL("INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b1875645764bf18f7d2a2848b818860a')");
+        db.execSQL("INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '5ff3a452e565eff954143ef5c808c86f')");
       }
 
       @Override
@@ -113,7 +113,7 @@ public final class AppDatabase_Impl extends AppDatabase {
                   + " Expected:\n" + _infoJobs + "\n"
                   + " Found:\n" + _existingJobs);
         }
-        final HashMap<String, TableInfo.Column> _columnsServiceReports = new HashMap<String, TableInfo.Column>(42);
+        final HashMap<String, TableInfo.Column> _columnsServiceReports = new HashMap<String, TableInfo.Column>(44);
         _columnsServiceReports.put("localId", new TableInfo.Column("localId", "TEXT", true, 1, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsServiceReports.put("odooId", new TableInfo.Column("odooId", "INTEGER", false, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsServiceReports.put("mobileExternalId", new TableInfo.Column("mobileExternalId", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
@@ -149,6 +149,7 @@ public final class AppDatabase_Impl extends AppDatabase {
         _columnsServiceReports.put("defectsFound", new TableInfo.Column("defectsFound", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsServiceReports.put("correctiveAction", new TableInfo.Column("correctiveAction", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsServiceReports.put("recommendations", new TableInfo.Column("recommendations", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
+        _columnsServiceReports.put("techniciansOnSite", new TableInfo.Column("techniciansOnSite", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsServiceReports.put("statusOfService", new TableInfo.Column("statusOfService", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsServiceReports.put("customerSignaturePath", new TableInfo.Column("customerSignaturePath", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsServiceReports.put("technicianSignaturePath", new TableInfo.Column("technicianSignaturePath", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
@@ -156,6 +157,7 @@ public final class AppDatabase_Impl extends AppDatabase {
         _columnsServiceReports.put("signatureDateTime", new TableInfo.Column("signatureDateTime", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsServiceReports.put("state", new TableInfo.Column("state", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
         _columnsServiceReports.put("syncStatus", new TableInfo.Column("syncStatus", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
+        _columnsServiceReports.put("syncError", new TableInfo.Column("syncError", "TEXT", true, 0, null, TableInfo.CREATED_FROM_ENTITY));
         final HashSet<TableInfo.ForeignKey> _foreignKeysServiceReports = new HashSet<TableInfo.ForeignKey>(0);
         final HashSet<TableInfo.Index> _indicesServiceReports = new HashSet<TableInfo.Index>(0);
         final TableInfo _infoServiceReports = new TableInfo("service_reports", _columnsServiceReports, _foreignKeysServiceReports, _indicesServiceReports);
@@ -200,7 +202,7 @@ public final class AppDatabase_Impl extends AppDatabase {
         }
         return new RoomOpenHelper.ValidationResult(true, null);
       }
-    }, "b1875645764bf18f7d2a2848b818860a", "c23005ac4a07833f9650e7bbbf5b15e8");
+    }, "5ff3a452e565eff954143ef5c808c86f", "d89639e01e7a35c87b8f568b0f89fd2c");
     final SupportSQLiteOpenHelper.Configuration _sqliteConfig = SupportSQLiteOpenHelper.Configuration.builder(config.context).name(config.name).callback(_openCallback).build();
     final SupportSQLiteOpenHelper _helper = config.sqliteOpenHelperFactory.create(_sqliteConfig);
     return _helper;

@@ -14,6 +14,37 @@ interface MobileApi {
     @GET("/api/mobile/jobs")
     suspend fun jobs(@Header("Authorization") bearer: String): JobsResponse
 
+    @GET("/api/mobile/jobs/{jobId}/service-report")
+    suspend fun serviceReport(
+        @Header("Authorization") bearer: String,
+        @Path("jobId") jobId: Long
+    ): ServiceReportResponse
+
+    @POST("/api/mobile/jobs/{jobId}/start")
+    suspend fun startJob(
+        @Header("Authorization") bearer: String,
+        @Path("jobId") jobId: Long
+    ): JobActionResponse
+
+    @POST("/api/mobile/jobs/{jobId}/stop")
+    suspend fun stopJob(
+        @Header("Authorization") bearer: String,
+        @Path("jobId") jobId: Long
+    ): JobActionResponse
+
+    @POST("/api/mobile/service-reports")
+    suspend fun upsertReport(
+        @Header("Authorization") bearer: String,
+        @Body request: ReportDto
+    ): ServiceReportResponse
+
+    @POST("/api/mobile/service-reports/{reportId}/submit")
+    suspend fun submitReport(
+        @Header("Authorization") bearer: String,
+        @Path("reportId") reportId: Long,
+        @Body request: ReportDto
+    ): ServiceReportResponse
+
     @POST("/api/mobile/sync")
     suspend fun sync(@Header("Authorization") bearer: String, @Body request: SyncRequest): SyncResponse
 
@@ -32,7 +63,7 @@ data class LoginResponse(
     val user: UserDto
 )
 data class UserDto(val id: Long, val name: String, val login: String)
-data class JobsResponse(val jobs: List<JobDto>)
+data class JobsResponse(val success: Boolean? = null, val error: String? = null, val jobs: List<JobDto> = emptyList())
 data class JobDto(
     val id: Any?,
     @Json(name = "job_number") val jobNumber: String,
@@ -46,8 +77,71 @@ data class JobDto(
     val description: String?
 )
 
+data class JobActionResponse(
+    val success: Boolean = false,
+    val error: String? = null,
+    @Json(name = "job_id") val jobId: Long? = null,
+    @Json(name = "report_id") val reportId: Long? = null,
+    val state: String? = null,
+    @Json(name = "sync_status") val syncStatus: String? = null,
+    val message: String? = null,
+    val report: ServiceReportDto? = null
+)
+
+data class ServiceReportResponse(
+    val success: Boolean = false,
+    val error: String? = null,
+    val report: ServiceReportDto? = null,
+    @Json(name = "sync_status") val syncStatus: String? = null,
+    val message: String? = null
+)
+
+data class ServiceReportDto(
+    val id: Any? = null,
+    val name: String? = null,
+    @Json(name = "report_number") val reportNumber: String? = null,
+    @Json(name = "job_id") val jobId: Any? = null,
+    @Json(name = "mobile_external_id") val mobileExternalId: String? = null,
+    @Json(name = "customer_id") val customerId: Any? = null,
+    @Json(name = "company_name") val companyName: String? = null,
+    @Json(name = "contact_name") val contactName: String? = null,
+    @Json(name = "customer_name") val customerName: String? = null,
+    val address: String? = null,
+    @Json(name = "service_date") val serviceDate: String? = null,
+    @Json(name = "arrival_time") val arrivalTime: String? = null,
+    @Json(name = "departure_time") val departureTime: String? = null,
+    val technician: String? = null,
+    @Json(name = "technician_name") val technicianName: String? = null,
+    val vehicle: String? = null,
+    @Json(name = "po_reference") val poReference: String? = null,
+    @Json(name = "service_type") val serviceType: String? = null,
+    @Json(name = "original_report_number") val originalReportNumber: String? = null,
+    val make: String? = null,
+    val model: String? = null,
+    val kva: String? = null,
+    @Json(name = "equipment_type") val equipmentType: String? = null,
+    @Json(name = "serial_number") val serialNumber: String? = null,
+    val load: String? = null,
+    @Json(name = "input_voltage") val inputVoltage: String? = null,
+    @Json(name = "output_voltage") val outputVoltage: String? = null,
+    @Json(name = "ups_system_down") val systemDown: Boolean? = null,
+    @Json(name = "battery_manufacturer") val batteryManufacturer: String? = null,
+    @Json(name = "battery_type") val batteryType: String? = null,
+    @Json(name = "battery_rating") val batteryRating: String? = null,
+    @Json(name = "battery_quantity") val batteryQuantity: Any? = null,
+    @Json(name = "problem_reported") val problemReported: String? = null,
+    @Json(name = "defects_found") val defectsFound: String? = null,
+    @Json(name = "corrective_action") val correctiveAction: String? = null,
+    val recommendations: String? = null,
+    @Json(name = "technicians_on_site") val techniciansOnSite: String? = null,
+    @Json(name = "status_of_service") val statusOfService: String? = null,
+    val state: String? = null,
+    @Json(name = "labor_hours") val laborHours: Double? = null,
+    val lines: List<PartDto> = emptyList()
+)
+
 data class SyncRequest(val reports: List<ReportDto>)
-data class SyncResponse(val results: List<SyncResultDto>)
+data class SyncResponse(val success: Boolean? = null, val error: String? = null, val results: List<SyncResultDto> = emptyList())
 data class SyncResultDto(
     @Json(name = "mobile_external_id") val mobileExternalId: String,
     @Json(name = "odoo_id") val odooId: Long?,
@@ -57,6 +151,7 @@ data class SyncResultDto(
 )
 
 data class ReportDto(
+    val id: Long?,
     @Json(name = "mobile_external_id") val mobileExternalId: String,
     @Json(name = "job_id") val jobId: Long?,
     @Json(name = "customer_id") val customerId: Long?,
@@ -86,6 +181,7 @@ data class ReportDto(
     @Json(name = "defects_found") val defectsFound: String,
     @Json(name = "corrective_action") val correctiveAction: String,
     val recommendations: String,
+    @Json(name = "technicians_on_site") val techniciansOnSite: String,
     @Json(name = "status_of_service") val statusOfService: String,
     @Json(name = "customer_signature_base64") val customerSignatureBase64: String,
     @Json(name = "technician_signature_base64") val technicianSignatureBase64: String,
@@ -96,12 +192,12 @@ data class ReportDto(
 )
 
 data class PartDto(
-    @Json(name = "part_name") val partName: String,
-    @Json(name = "serial_number") val serialNumber: String,
-    val quantity: Double,
+    @Json(name = "part_name") val partName: String = "",
+    @Json(name = "serial_number") val serialNumber: String = "",
+    val quantity: Double = 1.0,
     @Json(name = "line_type") val lineType: String = "part",
-    val invoiceable: Boolean,
-    val notes: String
+    val invoiceable: Boolean = true,
+    val notes: String = ""
 )
 
 data class AttachmentUploadRequest(val attachments: List<AttachmentDto>)

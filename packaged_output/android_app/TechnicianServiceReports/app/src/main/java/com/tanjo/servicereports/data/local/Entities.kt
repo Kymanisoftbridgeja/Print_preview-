@@ -57,13 +57,15 @@ data class ServiceReportEntity(
     val defectsFound: String = "",
     val correctiveAction: String = "",
     val recommendations: String = "",
+    val techniciansOnSite: String = "",
     val statusOfService: String = "",
     val customerSignaturePath: String = "",
     val technicianSignaturePath: String = "",
     val technicianName: String = "",
     val signatureDateTime: String = "",
     val state: String = "draft",
-    val syncStatus: String = "Local Draft"
+    val syncStatus: String = "Local Draft",
+    val syncError: String = ""
 )
 
 @Entity(tableName = "parts")

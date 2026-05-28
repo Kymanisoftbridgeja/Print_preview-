@@ -83,7 +83,7 @@ fun ServiceReportApp(vm: ServiceReportViewModel = viewModel()) {
                     if (report == null) {
                         HomeScreen(jobs, message, vm::login, vm::openJob, vm::newEmergencyReport)
                     } else {
-                    ReportScreen(report!!, parts, vm::save, vm::start, vm::stop, vm::submit, vm::addPart, vm::addPhoto) {
+                    ReportScreen(report!!, parts, message, vm::save, vm::start, vm::stop, vm::submit, vm::addPart, vm::removePart, vm::addPhoto) {
                         vm.selectedReportId.value = null
                     }
                 }
@@ -156,17 +156,21 @@ private fun JobCard(job: JobEntity, onOpen: (JobEntity) -> Unit) {
 private fun ReportScreen(
     report: ServiceReportEntity,
     parts: List<PartEntity>,
+    message: String,
     onSave: (ServiceReportEntity) -> Unit,
     onStart: (ServiceReportEntity) -> Unit,
     onStop: (ServiceReportEntity) -> Unit,
     onSubmit: (ServiceReportEntity) -> Unit,
-    onAddPart: (String, String, Double) -> Unit,
+    onAddPart: (String, String, String, Double, Boolean) -> Unit,
+    onRemovePart: (String) -> Unit,
     onAddPhoto: (String, String) -> Unit,
     onBack: () -> Unit
 ) {
     var draft by remember(report.localId) { mutableStateOf(report) }
     var newPart by remember { mutableStateOf("") }
+    var newSerial by remember { mutableStateOf("") }
     var newQty by remember { mutableStateOf("1") }
+    var newInvoiceable by remember { mutableStateOf(true) }
     val context = LocalContext.current
     val photoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -192,11 +196,19 @@ private fun ReportScreen(
                 }
             }
             Text("Status: ${report.state} | Sync: ${report.syncStatus}", fontWeight = FontWeight.Bold)
+            if (report.syncError.isNotBlank()) Text(report.syncError, color = MaterialTheme.colorScheme.error)
+            if (message.isNotBlank()) Text(message)
         }
         item { SectionTitle("Header Information") }
+        item { Field(draft.reportNumber, { draft = draft.copy(reportNumber = it) }, "Report Number") }
+        item { Field(draft.jobId?.toString().orEmpty(), {}, "Job Reference") }
         item { Field(draft.customerName, { draft = draft.copy(customerName = it) }, "Contact / Customer Name") }
         item { Field(draft.companyName, { draft = draft.copy(companyName = it) }, "Company Name") }
         item { Field(draft.address, { draft = draft.copy(address = it) }, "Address") }
+        item { Field(draft.serviceDate, { draft = draft.copy(serviceDate = it) }, "Service Date") }
+        item { Field(draft.arrivalTime, { draft = draft.copy(arrivalTime = it) }, "Arrival Time") }
+        item { Field(draft.departureTime, { draft = draft.copy(departureTime = it) }, "Departure Time") }
+        item { Field(draft.technicianName, { draft = draft.copy(technicianName = it) }, "Technician") }
         item { Field(draft.vehicle, { draft = draft.copy(vehicle = it) }, "Vehicle") }
         item { Field(draft.poReference, { draft = draft.copy(poReference = it) }, "PO / Reference") }
         item { Field(draft.serviceType, { draft = draft.copy(serviceType = it) }, "Service Type") }
@@ -217,24 +229,43 @@ private fun ReportScreen(
         item { Field(draft.batteryManufacturer, { draft = draft.copy(batteryManufacturer = it) }, "Battery Manufacturer") }
         item { Field(draft.batteryType, { draft = draft.copy(batteryType = it) }, "Battery Type") }
         item { Field(draft.batteryRating, { draft = draft.copy(batteryRating = it) }, "Battery Rating") }
+        item { Field(draft.batteryQuantity.toString(), { draft = draft.copy(batteryQuantity = it.toIntOrNull() ?: 0) }, "Battery Quantity") }
 
         item { SectionTitle("Service Information") }
         item { Field(draft.problemReported, { draft = draft.copy(problemReported = it) }, "Problem Reported / Service Rendered", true) }
         item { Field(draft.defectsFound, { draft = draft.copy(defectsFound = it) }, "Defects Found", true) }
         item { Field(draft.correctiveAction, { draft = draft.copy(correctiveAction = it) }, "Corrective Action Taken", true) }
         item { Field(draft.recommendations, { draft = draft.copy(recommendations = it) }, "Recommendations", true) }
+        item { Field(draft.techniciansOnSite, { draft = draft.copy(techniciansOnSite = it) }, "Technicians On-Site") }
         item { Field(draft.statusOfService, { draft = draft.copy(statusOfService = it) }, "Status of Service") }
 
         item { SectionTitle("Parts Used") }
-        items(parts) { Text("${it.partName}  |  ${it.serialNumber}  |  Qty ${it.quantity}") }
+        items(parts) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("${it.partName}  |  ${it.serialNumber}  |  Qty ${it.quantity}")
+                OutlinedButton(onClick = { onRemovePart(it.id) }) { Text("Remove") }
+            }
+        }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(newPart, { newPart = it }, label = { Text("Part Name") }, modifier = Modifier.weight(1f))
-                OutlinedTextField(newQty, { newQty = it }, label = { Text("Qty") }, modifier = Modifier.weight(0.4f))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(newPart, { newPart = it }, label = { Text("Part Name / Product") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(newSerial, { newSerial = it }, label = { Text("Serial Number") }, modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(newQty, { newQty = it }, label = { Text("Quantity") }, modifier = Modifier.weight(1f))
+                    Row(Modifier.weight(1f)) {
+                        Checkbox(newInvoiceable, { newInvoiceable = it })
+                        Text("Invoiceable")
+                    }
+                }
                 Button(onClick = {
-                    onAddPart(report.localId, newPart, newQty.toDoubleOrNull() ?: 1.0)
+                    onAddPart(report.localId, newPart, newSerial, newQty.toDoubleOrNull() ?: 1.0, newInvoiceable)
                     newPart = ""
-                }) { Icon(Icons.Default.Add, contentDescription = null) }
+                    newSerial = ""
+                    newQty = "1"
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Text("Add Part")
+                }
             }
         }
 
@@ -243,6 +274,7 @@ private fun ReportScreen(
         item { SignaturePad("Customer Signature") { draft = draft.copy(customerSignaturePath = it) } }
         item { Field(draft.technicianName, { draft = draft.copy(technicianName = it) }, "Technician Name") }
         item { SignaturePad("Technician Signature") { draft = draft.copy(technicianSignaturePath = it) } }
+        item { Field(draft.signatureDateTime, { draft = draft.copy(signatureDateTime = it) }, "Signature Date/Time") }
 
         item { SectionTitle("Photos / Attachments") }
         item {

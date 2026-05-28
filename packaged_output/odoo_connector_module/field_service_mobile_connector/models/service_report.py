@@ -40,6 +40,10 @@ class FieldServiceMobileToken(models.Model):
 class FieldServiceRoadReport(models.Model):
     _inherit = "field.service.road.report"
 
+    state = fields.Selection(
+        selection_add=[("assigned", "Assigned")],
+        ondelete={"assigned": "set default"},
+    )
     mobile_external_id = fields.Char(index=True, copy=False)
     mobile_last_sync_at = fields.Datetime(readonly=True, copy=False)
 
@@ -50,3 +54,15 @@ class FieldServiceRoadReport(models.Model):
             "This mobile report has already been synced.",
         )
     ]
+
+
+class FieldServiceRoadReportLine(models.Model):
+    _inherit = "field.service.road.report.line"
+
+    def _check_report_editable(self):
+        if self.env.user.has_group("field_service_road_reports.group_service_report_manager"):
+            return
+        editable_states = ("draft", "assigned", "in_progress", "completed", "rejected")
+        locked = self.filtered(lambda line: line.report_id.state not in editable_states)
+        if locked:
+            raise AccessError(_("Submitted report lines cannot be edited by technicians."))
