@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.Flow;
 public final class ServiceReportDao_Impl implements ServiceReportDao {
   private final RoomDatabase __db;
 
+  private final SharedSQLiteStatement __preparedStmtOfDeleteJobs;
+
   private final SharedSQLiteStatement __preparedStmtOfDeletePartsForReport;
 
   private final SharedSQLiteStatement __preparedStmtOfDeletePart;
@@ -49,6 +51,14 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
 
   public ServiceReportDao_Impl(@NonNull final RoomDatabase __db) {
     this.__db = __db;
+    this.__preparedStmtOfDeleteJobs = new SharedSQLiteStatement(__db) {
+      @Override
+      @NonNull
+      public String createQuery() {
+        final String _query = "delete from jobs";
+        return _query;
+      }
+    };
     this.__preparedStmtOfDeletePartsForReport = new SharedSQLiteStatement(__db) {
       @Override
       @NonNull
@@ -335,6 +345,29 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
         statement.bindString(6, entity.getId());
       }
     });
+  }
+
+  @Override
+  public Object deleteJobs(final Continuation<? super Unit> $completion) {
+    return CoroutinesRoom.execute(__db, true, new Callable<Unit>() {
+      @Override
+      @NonNull
+      public Unit call() throws Exception {
+        final SupportSQLiteStatement _stmt = __preparedStmtOfDeleteJobs.acquire();
+        try {
+          __db.beginTransaction();
+          try {
+            _stmt.executeUpdateDelete();
+            __db.setTransactionSuccessful();
+            return Unit.INSTANCE;
+          } finally {
+            __db.endTransaction();
+          }
+        } finally {
+          __preparedStmtOfDeleteJobs.release(_stmt);
+        }
+      }
+    }, $completion);
   }
 
   @Override

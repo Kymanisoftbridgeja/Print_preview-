@@ -406,7 +406,7 @@ class FieldServiceMobileApi(http.Controller):
             "report_origin": "job" if data.get("job_id") else "emergency",
             "customer_id": customer_id,
             "driver_id": env.user.id,
-            "service_date": service_date,
+            "service_date": self._date_from_mobile(service_date),
             "start_datetime": arrival_dt,
             "stop_datetime": departure_dt,
             "vehicle": data.get("vehicle"),
@@ -471,7 +471,7 @@ class FieldServiceMobileApi(http.Controller):
         report = self._report_for_job(job.env, job)
         return {
             "id": job.id,
-            "job_number": job.display_name or "",
+            "job_number": job.display_name or job.name or f"Job #{job.id}",
             "customer_id": partner.id if partner else None,
             "company_name": company.name if company else "",
             "contact_name": contact.name if contact else "",
@@ -567,18 +567,36 @@ class FieldServiceMobileApi(http.Controller):
         if not value:
             return False
         if isinstance(value, str) and len(value) <= 5 and ":" in value:
-            service_date = fields.Date.to_date(service_date) or fields.Date.today()
+            service_date = fields.Date.to_date(self._date_from_mobile(service_date)) or fields.Date.today()
             hour, minute = value.split(":", 1)
             return fields.Datetime.to_string(datetime.combine(service_date, time(int(hour), int(minute[:2]))))
         if isinstance(value, str):
-            normalized = value.replace("Z", "+00:00").replace("T", " ")
+            normalized = value.strip()
             try:
+                if normalized.endswith("Z"):
+                    normalized = normalized[:-1] + "+00:00"
+                normalized = normalized.replace("T", " ")
                 parsed = datetime.fromisoformat(normalized)
                 if parsed.tzinfo:
                     parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
                 return fields.Datetime.to_string(parsed)
             except ValueError:
-                return value
+                for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%H:%M:%S"):
+                    try:
+                        parsed = datetime.strptime(normalized, pattern)
+                        if pattern.startswith("%H"):
+                            parsed = datetime.combine(fields.Date.to_date(self._date_from_mobile(service_date)), parsed.time())
+                        return fields.Datetime.to_string(parsed)
+                    except ValueError:
+                        continue
+                return False
+        return value
+
+    def _date_from_mobile(self, value):
+        if not value:
+            return fields.Date.today()
+        if isinstance(value, str):
+            return value[:10]
         return value
 
     def _float_time_from_datetime(self, record, value):

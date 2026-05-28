@@ -28,6 +28,9 @@ interface ServiceReportDao {
     @Query("select * from attachments where reportLocalId = :localId")
     suspend fun attachmentsForReport(localId: String): List<AttachmentEntity>
 
+    @Query("delete from jobs")
+    suspend fun deleteJobs()
+
     @Query("delete from parts where reportLocalId = :localId")
     suspend fun deletePartsForReport(localId: String)
 

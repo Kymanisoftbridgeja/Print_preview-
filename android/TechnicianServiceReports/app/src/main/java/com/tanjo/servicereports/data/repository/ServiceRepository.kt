@@ -20,7 +20,9 @@ import com.tanjo.servicereports.data.remote.ReportDto
 import com.tanjo.servicereports.data.remote.ServiceReportDto
 import com.tanjo.servicereports.data.remote.SyncRequest
 import java.io.IOException
-import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import org.json.JSONObject
@@ -54,12 +56,11 @@ class ServiceRepository(context: Context) {
     suspend fun refreshJobs() {
         val response = runRemote("jobs") { api().jobs(bearer()) }
         if (response.success == false) throw IllegalStateException(response.error ?: "Odoo rejected the Job sync.")
-        dao.upsertJobs(
-            response.jobs.mapNotNull {
+        val jobs = response.jobs.mapNotNull {
                 val jobId = it.id.asLongOrNull() ?: return@mapNotNull null
                 JobEntity(
                     id = jobId,
-                    jobNumber = it.jobNumber,
+                    jobNumber = it.jobNumber.ifBlank { "Job #$jobId" },
                     customerId = it.customerId.asLongOrNull(),
                     companyName = it.companyName.orEmpty(),
                     contactName = it.contactName.orEmpty(),
@@ -72,7 +73,8 @@ class ServiceRepository(context: Context) {
                     description = it.description.orEmpty()
                 )
             }
-        )
+        dao.deleteJobs()
+        dao.upsertJobs(jobs)
     }
 
     suspend fun reportForJob(job: JobEntity): ServiceReportEntity {
@@ -127,7 +129,8 @@ class ServiceRepository(context: Context) {
 
     suspend fun startJob(report: ServiceReportEntity): String {
         val localStart = report.copy(
-            arrivalTime = report.arrivalTime.ifBlank { Instant.now().toString() },
+            serviceDate = report.serviceDate.ifBlank { todayString() },
+            arrivalTime = report.arrivalTime.ifBlank { nowTimeString() },
             state = "in_progress",
             syncStatus = "Pending Sync",
             syncError = ""
@@ -147,7 +150,8 @@ class ServiceRepository(context: Context) {
 
     suspend fun stopJob(report: ServiceReportEntity): String {
         val localStop = report.copy(
-            departureTime = report.departureTime.ifBlank { Instant.now().toString() },
+            serviceDate = report.serviceDate.ifBlank { todayString() },
+            departureTime = report.departureTime.ifBlank { nowTimeString() },
             state = "completed",
             syncStatus = "Pending Sync",
             syncError = ""
@@ -279,9 +283,9 @@ class ServiceRepository(context: Context) {
             customerId = customerId,
             customerName = customerName.ifBlank { contactName.ifBlank { companyName } },
             address = address,
-            serviceDate = serviceDate,
-            arrivalTime = arrivalTime.ifBlank { null },
-            departureTime = departureTime.ifBlank { null },
+            serviceDate = normalizeDateForOdoo(serviceDate),
+            arrivalTime = normalizeTimeForOdoo(arrivalTime),
+            departureTime = normalizeTimeForOdoo(departureTime),
             vehicle = vehicle,
             poReference = poReference,
             serviceType = serviceType,
@@ -401,6 +405,24 @@ class ServiceRepository(context: Context) {
         is Number -> toInt()
         is String -> toIntOrNull()
         else -> null
+    }
+
+    private fun nowTimeString(): String = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+
+    private fun todayString(): String = LocalDate.now().toString()
+
+    private fun normalizeDateForOdoo(value: String): String =
+        when {
+            value.isBlank() -> todayString()
+            value.length >= 10 -> value.take(10)
+            else -> value
+        }
+
+    private fun normalizeTimeForOdoo(value: String): String? {
+        if (value.isBlank()) return null
+        if (value.length >= 16 && value[10] == 'T') return value.substring(11, 16)
+        if (value.length >= 16 && value[10] == ' ') return value.substring(11, 16)
+        return value.take(5)
     }
 
     companion object {
