@@ -1,4 +1,5 @@
 import json
+import inspect
 
 from odoo.service import db as db_service
 from odoo import fields, http
@@ -30,7 +31,7 @@ class FieldServiceMobileApi(http.Controller):
                 },
                 status=400,
             )
-        uid = request.session.authenticate(db, data.get("login"), data.get("password"))
+        uid = self._authenticate_session(db, data.get("login"), data.get("password"))
         if not uid:
             return self._json({"error": "Invalid login"}, status=401)
         user = request.env["res.users"].sudo().browse(uid)
@@ -46,6 +47,17 @@ class FieldServiceMobileApi(http.Controller):
     def _single_database(self):
         databases = db_service.list_dbs(force=True)
         return databases[0] if len(databases) == 1 else False
+
+    def _authenticate_session(self, db, login, password):
+        if not login or not password:
+            return False
+        if db:
+            request.session.db = db
+        authenticate = request.session.authenticate
+        parameter_count = len(inspect.signature(authenticate).parameters)
+        if parameter_count == 2:
+            return authenticate(login, password)
+        return authenticate(db, login, password)
 
     @http.route("/api/mobile/jobs", type="http", auth="none", methods=["GET"], csrf=False)
     def jobs(self):
