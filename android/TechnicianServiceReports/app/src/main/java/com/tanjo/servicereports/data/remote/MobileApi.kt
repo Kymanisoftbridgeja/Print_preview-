@@ -155,6 +155,8 @@ data class ReportDto(
     @Json(name = "mobile_external_id") val mobileExternalId: String,
     @Json(name = "job_id") val jobId: Long?,
     @Json(name = "customer_id") val customerId: Long?,
+    @Json(name = "company_name") val companyName: String,
+    @Json(name = "contact_name") val contactName: String,
     @Json(name = "customer_name") val customerName: String,
     val address: String,
     @Json(name = "service_date") val serviceDate: String,

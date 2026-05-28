@@ -189,8 +189,9 @@ class ServiceRepository(context: Context) {
             response.message ?: "Service report submitted successfully"
         } catch (error: Throwable) {
             val status = if (error is IOException) "Pending Sync" else "Sync Failed"
-            dao.upsertReport(pending.copy(syncStatus = status, syncError = readableError(error)))
-            throw IllegalStateException(readableError(error), error)
+            val errorText = readableError(error)
+            dao.upsertReport(pending.copy(syncStatus = status, syncError = errorText))
+            "Report saved locally. Sync failed: $errorText"
         }
     }
 
@@ -281,6 +282,8 @@ class ServiceRepository(context: Context) {
             mobileExternalId = mobileExternalId,
             jobId = jobId,
             customerId = customerId,
+            companyName = companyName,
+            contactName = contactName,
             customerName = customerName.ifBlank { contactName.ifBlank { companyName } },
             address = address,
             serviceDate = normalizeDateForOdoo(serviceDate),

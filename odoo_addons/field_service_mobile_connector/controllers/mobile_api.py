@@ -328,24 +328,41 @@ class FieldServiceMobileApi(http.Controller):
         return self._json({"success": True, "results": results})
 
     def _assigned_jobs(self, env):
-        Task = env["project.task"]
+        Task = env["project.task"].sudo()
         domain = [("is_fsm", "=", True)] if "is_fsm" in Task._fields else []
-        if "user_ids" in Task._fields:
-            domain.append(("user_ids", "in", env.user.id))
-        elif "user_id" in Task._fields:
-            domain.append(("user_id", "=", env.user.id))
-        return Task.search(domain, order="date_deadline asc, id desc")
+        jobs = Task.search(domain, order="date_deadline asc, id desc")
+        if env.user.has_group("field_service_road_reports.group_service_report_manager"):
+            return jobs
+        assigned = jobs.filtered(lambda job: self._job_assigned_to_user(job, env.user))
+        report_jobs = env["field.service.road.report"].sudo().search(
+            [("driver_id", "=", env.user.id), ("task_id", "!=", False)]
+        ).mapped("task_id")
+        return assigned | report_jobs
 
     def _assigned_job(self, env, job_id):
-        job = env["project.task"].browse(job_id).exists()
+        job = env["project.task"].sudo().browse(job_id).exists()
         if not job:
             raise UserError("Job not found.")
         if job not in self._assigned_jobs(env):
             raise AccessError("Access denied for technician.")
         return job
 
+    def _job_assigned_to_user(self, job, user):
+        for field_name in ("user_ids", "assigned_user_ids"):
+            if field_name in job._fields and user in job[field_name]:
+                return True
+        for field_name in ("user_id", "fsm_user_id", "responsible_id"):
+            if field_name in job._fields and job[field_name] == user:
+                return True
+        employee = user.employee_id if "employee_id" in user._fields else False
+        if employee:
+            for field_name in ("employee_id", "technician_id"):
+                if field_name in job._fields and job[field_name] == employee:
+                    return True
+        return False
+
     def _report_for_job(self, env, job):
-        return env["field.service.road.report"].search(
+        return env["field.service.road.report"].sudo().search(
             [("task_id", "=", job.id), ("driver_id", "=", env.user.id)],
             order="service_date desc, id desc",
             limit=1,
@@ -367,10 +384,10 @@ class FieldServiceMobileApi(http.Controller):
                 "state": "assigned",
             }
         )
-        return env["field.service.road.report"].with_context(service_report_skip_lock=True).create(values)
+        return env["field.service.road.report"].sudo().with_context(service_report_skip_lock=True).create(values)
 
     def _upsert_report(self, env, data, report=None):
-        Report = env["field.service.road.report"].with_context(service_report_skip_lock=True)
+        Report = env["field.service.road.report"].sudo().with_context(service_report_skip_lock=True)
         if not report and data.get("id"):
             report = Report.browse(data["id"]).exists()
         if not report and data.get("mobile_external_id"):
