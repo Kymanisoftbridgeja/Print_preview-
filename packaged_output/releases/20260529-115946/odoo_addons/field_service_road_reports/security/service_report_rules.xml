@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="rule_service_report_technician_own" model="ir.rule">
+        <field name="name">Technicians see their own service reports</field>
+        <field name="model_id" ref="model_field_service_road_report"/>
+        <field name="domain_force">['|', ('driver_id', '=', user.id), ('task_id.user_ids', 'in', [user.id])]</field>
+        <field name="groups" eval="[(4, ref('field_service_road_reports.group_service_report_technician'))]"/>
+    </record>
+
+    <record id="rule_service_report_line_technician_own" model="ir.rule">
+        <field name="name">Technicians see lines on their own service reports</field>
+        <field name="model_id" ref="model_field_service_road_report_line"/>
+        <field name="domain_force">['|', ('report_id.driver_id', '=', user.id), ('report_id.task_id.user_ids', 'in', [user.id])]</field>
+        <field name="groups" eval="[(4, ref('field_service_road_reports.group_service_report_technician'))]"/>
+    </record>
+
+    <record id="rule_service_report_manager_all" model="ir.rule">
+        <field name="name">Managers see all service reports</field>
+        <field name="model_id" ref="model_field_service_road_report"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('field_service_road_reports.group_service_report_manager'))]"/>
+    </record>
+
+    <record id="rule_service_report_line_manager_all" model="ir.rule">
+        <field name="name">Managers see all service report lines</field>
+        <field name="model_id" ref="model_field_service_road_report_line"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('field_service_road_reports.group_service_report_manager'))]"/>
+    </record>
+
+    <record id="rule_service_report_technician_assigned_tasks" model="ir.rule">
+        <field name="name">Technicians see assigned Field Service tasks</field>
+        <field name="model_id" ref="project.model_project_task"/>
+        <field name="domain_force">[('user_ids', 'in', [user.id])]</field>
+        <field name="groups" eval="[(4, ref('field_service_road_reports.group_service_report_technician'))]"/>
+    </record>
+
+    <record id="rule_service_report_manager_all_tasks" model="ir.rule">
+        <field name="name">Managers see Field Service tasks for review</field>
+        <field name="model_id" ref="project.model_project_task"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('field_service_road_reports.group_service_report_manager'))]"/>
+    </record>
+</odoo>

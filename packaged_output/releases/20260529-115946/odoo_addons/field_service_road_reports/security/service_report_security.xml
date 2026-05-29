@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="group_service_report_technician" model="res.groups">
+        <field name="name">Service Report Technician</field>
+    </record>
+
+    <record id="group_service_report_manager" model="res.groups">
+        <field name="name">Service Report Reviewer / Manager</field>
+        <field name="implied_ids" eval="[(4, ref('field_service_road_reports.group_service_report_technician'))]"/>
+    </record>
+</odoo>
