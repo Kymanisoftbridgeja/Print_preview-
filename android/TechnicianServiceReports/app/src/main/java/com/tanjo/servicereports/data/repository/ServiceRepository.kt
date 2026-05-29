@@ -41,6 +41,7 @@ class ServiceRepository(context: Context) {
     private val dao = AppDatabase.get(context).dao()
 
     val jobs: Flow<List<JobEntity>> = dao.observeJobs()
+    val serviceReports: Flow<List<ServiceReportEntity>> = dao.observeReports()
 
     val connectionDefaults: ConnectionDefaults
         get() = ConnectionDefaults(
@@ -69,6 +70,7 @@ class ServiceRepository(context: Context) {
             .putString("technician_name", response.user.name)
             .putString("device_id", prefs.getString("device_id", null) ?: UUID.randomUUID().toString())
             .apply()
+        refreshServiceReports()
         return refreshJobs()
     }
 
@@ -96,6 +98,18 @@ class ServiceRepository(context: Context) {
         dao.deleteJobs()
         dao.upsertJobs(jobs)
         return response.message?.takeIf { it.isNotBlank() } ?: "${jobs.size} Jobs synced"
+    }
+
+    suspend fun refreshServiceReports(): String {
+        val response = runRemote("service-reports") { api().serviceReports(bearer()) }
+        if (response.success == false) throw IllegalStateException(response.error ?: "Odoo rejected the Service Report sync.")
+        response.reports.forEach { remote ->
+            val existing = remote.id.asLongOrNull()?.let { dao.reportForOdooId(it) }
+            val local = remote.toEntity(existing, null)
+            dao.upsertReport(local)
+            replaceParts(local.localId, remote.lines)
+        }
+        return response.message?.takeIf { it.isNotBlank() } ?: "${response.reports.size} Service Reports synced"
     }
 
     suspend fun reportForJob(job: JobEntity): ServiceReportEntity {
@@ -157,11 +171,18 @@ class ServiceRepository(context: Context) {
             syncError = ""
         )
         dao.upsertReport(localStart)
-        val remoteId = localStart.odooId ?: localStart.jobId ?: return "Start saved locally for emergency report"
+        val reportId = localStart.odooId
+        val remoteId = reportId ?: localStart.jobId ?: return "Start saved locally for emergency report"
         return try {
-            val response = runRemote("start-job") { api().startJob(bearer(), remoteId) }
-            applyJobAction(localStart, response)
-            response.message ?: "Job started successfully"
+            if (reportId != null) {
+                val response = runRemote("start-report") { api().startReport(bearer(), reportId) }
+                applyReportResponse(localStart, response)
+                response.message ?: "Service report started successfully"
+            } else {
+                val response = runRemote("start-job") { api().startJob(bearer(), remoteId) }
+                applyJobAction(localStart, response)
+                response.message ?: "Service report started successfully"
+            }
         } catch (error: Throwable) {
             val status = if (error is IOException) "Pending Sync" else "Sync Failed"
             val errorText = readableError(error)
@@ -184,11 +205,18 @@ class ServiceRepository(context: Context) {
             syncError = ""
         )
         dao.upsertReport(localStop)
-        val remoteId = localStop.odooId ?: localStop.jobId ?: return "Stop saved locally for emergency report"
+        val reportId = localStop.odooId
+        val remoteId = reportId ?: localStop.jobId ?: return "Stop saved locally for emergency report"
         return try {
-            val response = runRemote("stop-job") { api().stopJob(bearer(), remoteId) }
-            applyJobAction(localStop, response)
-            response.message ?: "Job stopped successfully"
+            if (reportId != null) {
+                val response = runRemote("stop-report") { api().stopReport(bearer(), reportId) }
+                applyReportResponse(localStop, response)
+                response.message ?: "Service report stopped successfully"
+            } else {
+                val response = runRemote("stop-job") { api().stopJob(bearer(), remoteId) }
+                applyJobAction(localStop, response)
+                response.message ?: "Service report stopped successfully"
+            }
         } catch (error: Throwable) {
             val status = if (error is IOException) "Pending Sync" else "Sync Failed"
             val errorText = readableError(error)
@@ -260,6 +288,12 @@ class ServiceRepository(context: Context) {
         dao.upsertReport(updated.copy(syncStatus = "Synced", syncError = ""))
     }
 
+    private suspend fun applyReportResponse(local: ServiceReportEntity, response: com.tanjo.servicereports.data.remote.ServiceReportResponse) {
+        if (!response.success) throw IllegalStateException(response.error ?: "Odoo rejected the Service Report update.")
+        val updated = response.report?.toEntity(local, null) ?: local
+        dao.upsertReport(updated.copy(syncStatus = "Synced", syncError = ""))
+    }
+
     private suspend fun uploadAttachments(report: ServiceReportEntity, odooId: Long) {
         if (odooId <= 0) return
         val attachments = dao.attachmentsForReport(report.localId)
@@ -315,6 +349,9 @@ class ServiceRepository(context: Context) {
             id = odooId,
             mobileExternalId = mobileExternalId,
             jobId = jobId,
+            fieldServiceJobId = jobId,
+            source = "mobile",
+            submittedFromMobile = submit,
             customerId = customerId,
             companyName = companyName,
             contactName = contactName,
@@ -360,7 +397,7 @@ class ServiceRepository(context: Context) {
             localId = existing?.localId ?: UUID.randomUUID().toString(),
             odooId = id.asLongOrNull(),
             mobileExternalId = mobileExternalId ?: existing?.mobileExternalId ?: this@ServiceRepository.mobileExternalId(),
-            jobId = jobId.asLongOrNull() ?: existing?.jobId ?: job?.id,
+            jobId = fieldServiceJobId.asLongOrNull() ?: jobId.asLongOrNull() ?: existing?.jobId ?: job?.id,
             reportNumber = reportNumber ?: name ?: existing?.reportNumber.orEmpty(),
             customerId = customerId.asLongOrNull() ?: existing?.customerId ?: job?.customerId,
             customerName = customerName ?: existing?.customerName ?: job?.contactName.orEmpty(),

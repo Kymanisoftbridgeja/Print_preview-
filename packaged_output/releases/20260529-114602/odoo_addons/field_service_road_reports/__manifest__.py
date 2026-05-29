@@ -1,0 +1,25 @@
+{
+    "name": "Field Service Road Reports",
+    "summary": "Capture driver service reports from Odoo Field Service jobs",
+    "version": "1.0.0",
+    "category": "Services/Field Service",
+    "author": "Tanjo Electrical",
+    "license": "LGPL-3",
+    "depends": [
+        "industry_fsm",
+        "sale_management",
+        "sale_timesheet",
+        "account",
+        "mail",
+    ],
+    "data": [
+        "security/service_report_security.xml",
+        "security/ir.model.access.csv",
+        "security/service_report_rules.xml",
+        "data/service_report_sequence.xml",
+        "views/service_report_views.xml",
+        "views/project_task_views.xml",
+    ],
+    "installable": True,
+    "application": True,
+}

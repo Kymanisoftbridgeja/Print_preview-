@@ -23,6 +23,7 @@ class ServiceReportViewModel(app: Application) : AndroidViewModel(app) {
     private val repository = ServiceRepository(app)
     val connectionDefaults = repository.connectionDefaults
     val jobs = repository.jobs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val serviceReports = repository.serviceReports.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val selectedReportId = MutableStateFlow<String?>(null)
     val message = MutableStateFlow("")
 
@@ -47,9 +48,17 @@ class ServiceReportViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refresh() = viewModelScope.launch {
-        runCatching { repository.refreshJobs() }
+        runCatching {
+            val reportsMessage = repository.refreshServiceReports()
+            val jobsMessage = repository.refreshJobs()
+            "$reportsMessage; $jobsMessage"
+        }
             .onSuccess { message.value = it }
             .onFailure { message.value = it.message ?: "Offline: showing saved Jobs" }
+    }
+
+    fun openReport(report: ServiceReportEntity) {
+        selectedReportId.value = report.localId
     }
 
     fun openJob(job: JobEntity) = viewModelScope.launch {

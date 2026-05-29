@@ -61,6 +61,7 @@ import com.tanjo.servicereports.data.repository.ConnectionDefaults
 @Composable
 fun ServiceReportApp(vm: ServiceReportViewModel = viewModel()) {
     val jobs by vm.jobs.collectAsState()
+    val serviceReports by vm.serviceReports.collectAsState()
     val report by vm.selectedReport.collectAsState()
     val parts by vm.parts.collectAsState()
     val message by vm.message.collectAsState()
@@ -82,7 +83,16 @@ fun ServiceReportApp(vm: ServiceReportViewModel = viewModel()) {
         ) { padding ->
             Surface(Modifier.fillMaxSize().padding(padding)) {
                     if (report == null) {
-                        HomeScreen(jobs, message, vm.connectionDefaults, vm::login, vm::openJob, vm::newEmergencyReport)
+                        HomeScreen(
+                            jobs,
+                            serviceReports,
+                            message,
+                            vm.connectionDefaults,
+                            vm::login,
+                            vm::openJob,
+                            vm::openReport,
+                            vm::newEmergencyReport
+                        )
                     } else {
                     ReportScreen(report!!, parts, message, vm::save, vm::start, vm::stop, vm::submit, vm::addPart, vm::removePart, vm::addPhoto) {
                         vm.selectedReportId.value = null
@@ -96,10 +106,12 @@ fun ServiceReportApp(vm: ServiceReportViewModel = viewModel()) {
 @Composable
 private fun HomeScreen(
     jobs: List<JobEntity>,
+    reports: List<ServiceReportEntity>,
     message: String,
     connectionDefaults: ConnectionDefaults,
     onLogin: (String, String, String, String) -> Unit,
     onOpenJob: (JobEntity) -> Unit,
+    onOpenReport: (ServiceReportEntity) -> Unit,
     onEmergency: () -> Unit
 ) {
     var baseUrl by remember(connectionDefaults) { mutableStateOf(connectionDefaults.baseUrl) }
@@ -129,14 +141,31 @@ private fun HomeScreen(
                 Text("New Service Report")
             }
         }
-        if (jobs.isEmpty()) {
-            item {
-                Text("No Jobs synced yet. Log in, then tap Refresh. Offline reports remain saved on this device.")
-            }
-        }
+        item { SectionTitle("Assigned Jobs") }
+        if (jobs.isEmpty()) item { Text("No assigned Jobs synced yet.") }
         items(jobs) { job ->
             JobCard(job, onOpenJob)
         }
+        item { SectionTitle("My Service Reports") }
+        val myReports = reports.filter { it.syncStatus == "Synced" && it.state !in setOf("submitted", "approved", "quotation_created") }
+        if (myReports.isEmpty()) item { Text("No active Service Reports synced yet.") }
+        items(myReports) { report -> ReportCard(report, onOpenReport) }
+        item { SectionTitle("Draft Reports") }
+        val draftReports = reports.filter { it.state in setOf("draft", "assigned", "in_progress", "completed", "rejected") && it.syncStatus != "Pending Sync" }
+        if (draftReports.isEmpty()) item { Text("No draft reports.") }
+        items(draftReports) { report -> ReportCard(report, onOpenReport) }
+        item { SectionTitle("Pending Sync") }
+        val pendingReports = reports.filter { it.syncStatus in setOf("Pending Sync", "Sync Failed", "Syncing") }
+        if (pendingReports.isEmpty()) item { Text("No reports waiting to sync.") }
+        items(pendingReports) { report -> ReportCard(report, onOpenReport) }
+        item { SectionTitle("Submitted Reports") }
+        val submittedReports = reports.filter { it.state == "submitted" }
+        if (submittedReports.isEmpty()) item { Text("No submitted reports.") }
+        items(submittedReports) { report -> ReportCard(report, onOpenReport) }
+        item { SectionTitle("Emergency Reports") }
+        val emergencyReports = reports.filter { it.jobId == null }
+        if (emergencyReports.isEmpty()) item { Text("No emergency reports.") }
+        items(emergencyReports) { report -> ReportCard(report, onOpenReport) }
     }
 }
 
@@ -154,6 +183,24 @@ private fun JobCard(job: JobEntity, onOpen: (JobEntity) -> Unit) {
                 Text(job.jobStatus)
                 Text(job.syncStatus)
                 Text(job.reportStatus)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReportCard(report: ServiceReportEntity, onOpen: (ServiceReportEntity) -> Unit) {
+    Card(onClick = { onOpen(report) }) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(report.reportNumber.ifBlank { "Service Report" }, fontWeight = FontWeight.Bold)
+            Text(report.companyName.ifBlank { report.customerName })
+            if (report.contactName.isNotBlank()) Text("Contact: ${report.contactName}")
+            Text(report.address)
+            Text("Service Date: ${report.serviceDate}")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(report.state)
+                Text(report.syncStatus)
+                Text(if (report.jobId == null) "Emergency" else "Linked Job #${report.jobId}")
             }
         }
     }

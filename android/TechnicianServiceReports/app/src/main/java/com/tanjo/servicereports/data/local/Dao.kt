@@ -13,6 +13,9 @@ interface ServiceReportDao {
     @Query("select * from service_reports where localId = :localId")
     fun observeReport(localId: String): Flow<ServiceReportEntity?>
 
+    @Query("select * from service_reports order by serviceDate desc, reportNumber desc")
+    fun observeReports(): Flow<List<ServiceReportEntity>>
+
     @Query("select * from service_reports where jobId = :jobId limit 1")
     suspend fun reportForJob(jobId: Long): ServiceReportEntity?
 

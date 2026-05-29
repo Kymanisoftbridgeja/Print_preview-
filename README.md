@@ -15,13 +15,22 @@ Install both addons from the `odoo_addons` path:
 
 The `field_service_road_reports` addon is the section users see in Odoo. It adds the **Service Reports** app/menu, the report forms, the Field Service job buttons, and the review/quotation workflow.
 
+The **Service Reports** menu contains:
+
+- My Reports
+- Submitted from Mobile
+- Linked to Field Service Jobs
+- Emergency / Unscheduled Reports
+- Approved Reports
+- All Reports
+
 The `field_service_mobile_connector` addon adds:
 
 - mobile access tokens
 - secure JSON endpoints under `/api/mobile/*`
 - duplicate prevention and sync tracking fields on `field.service.road.report`
 
-It does not replace the report module. It facilitates Android login, assigned Job download, offline report upload, photos, signatures, and retry-safe syncing into the `field.service.road.report` records.
+The mobile connector treats `field.service.road.report` as the primary workflow record. Field Service Jobs are only linked when applicable.
 
 ## Android App
 
@@ -46,7 +55,10 @@ Photos and signatures are distinct data paths. Signatures are captured from touc
 
 - `POST /api/mobile/login`
 - `GET /api/mobile/jobs`
+- `GET /api/mobile/service-reports`
 - `GET /api/mobile/jobs/<job_id>`
+- `POST /api/mobile/service-reports/<report_id>/start`
+- `POST /api/mobile/service-reports/<report_id>/stop`
 - `POST /api/mobile/service-reports`
 - `POST /api/mobile/service-reports/<report_id>/submit`
 - `POST /api/mobile/service-reports/<report_id>/attachments`

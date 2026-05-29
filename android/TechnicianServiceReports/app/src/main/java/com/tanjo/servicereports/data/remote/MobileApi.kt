@@ -14,6 +14,9 @@ interface MobileApi {
     @GET("/api/mobile/jobs")
     suspend fun jobs(@Header("Authorization") bearer: String): JobsResponse
 
+    @GET("/api/mobile/service-reports")
+    suspend fun serviceReports(@Header("Authorization") bearer: String): ServiceReportsResponse
+
     @GET("/api/mobile/jobs/{jobId}/service-report")
     suspend fun serviceReport(
         @Header("Authorization") bearer: String,
@@ -31,6 +34,18 @@ interface MobileApi {
         @Header("Authorization") bearer: String,
         @Path("jobId") jobId: Long
     ): JobActionResponse
+
+    @POST("/api/mobile/service-reports/{reportId}/start")
+    suspend fun startReport(
+        @Header("Authorization") bearer: String,
+        @Path("reportId") reportId: Long
+    ): ServiceReportResponse
+
+    @POST("/api/mobile/service-reports/{reportId}/stop")
+    suspend fun stopReport(
+        @Header("Authorization") bearer: String,
+        @Path("reportId") reportId: Long
+    ): ServiceReportResponse
 
     @POST("/api/mobile/service-reports")
     suspend fun upsertReport(
@@ -102,12 +117,24 @@ data class ServiceReportResponse(
     val message: String? = null
 )
 
+data class ServiceReportsResponse(
+    val success: Boolean? = null,
+    val error: String? = null,
+    val message: String? = null,
+    val reports: List<ServiceReportDto> = emptyList()
+)
+
 data class ServiceReportDto(
     val id: Any? = null,
     val name: String? = null,
     @Json(name = "report_number") val reportNumber: String? = null,
     @Json(name = "job_id") val jobId: Any? = null,
+    @Json(name = "field_service_job_id") val fieldServiceJobId: Any? = null,
     @Json(name = "mobile_external_id") val mobileExternalId: String? = null,
+    val source: String? = null,
+    @Json(name = "submitted_from_mobile") val submittedFromMobile: Boolean? = null,
+    @Json(name = "mobile_sync_status") val mobileSyncStatus: String? = null,
+    @Json(name = "is_emergency_report") val isEmergencyReport: Boolean? = null,
     @Json(name = "customer_id") val customerId: Any? = null,
     @Json(name = "company_name") val companyName: String? = null,
     @Json(name = "contact_name") val contactName: String? = null,
@@ -161,6 +188,9 @@ data class ReportDto(
     val id: Long?,
     @Json(name = "mobile_external_id") val mobileExternalId: String,
     @Json(name = "job_id") val jobId: Long?,
+    @Json(name = "field_service_job_id") val fieldServiceJobId: Long?,
+    val source: String = "mobile",
+    @Json(name = "submitted_from_mobile") val submittedFromMobile: Boolean,
     @Json(name = "customer_id") val customerId: Long?,
     @Json(name = "company_name") val companyName: String,
     @Json(name = "contact_name") val contactName: String,
@@ -181,7 +211,7 @@ data class ReportDto(
     val load: String,
     @Json(name = "input_voltage") val inputVoltage: String,
     @Json(name = "output_voltage") val outputVoltage: String,
-    @Json(name = "system_down") val systemDown: Boolean,
+    @Json(name = "ups_system_down") val systemDown: Boolean,
     @Json(name = "battery_manufacturer") val batteryManufacturer: String,
     @Json(name = "battery_type") val batteryType: String,
     @Json(name = "battery_rating") val batteryRating: String,
