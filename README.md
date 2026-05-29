@@ -2,18 +2,26 @@
 
 This workspace contains two deliverables:
 
+- `odoo_addons/field_service_road_reports`: Odoo Service Reports module that adds the backend report model, menus, views, review workflow, quotations, invoices, and Field Service job buttons.
 - `odoo_addons/field_service_mobile_connector`: Odoo connector addon for Android sync into the existing `field_service_road_reports` workflow.
 - `android/TechnicianServiceReports`: native Android Kotlin app using Room for offline storage and WorkManager for retryable sync.
 
 ## Odoo Addon
 
-Install `field_service_mobile_connector` from the `odoo_addons` path after the existing `field_service_road_reports` module is installed. The addon adds:
+Install both addons from the `odoo_addons` path:
+
+1. `field_service_road_reports`
+2. `field_service_mobile_connector`
+
+The `field_service_road_reports` addon is the section users see in Odoo. It adds the **Service Reports** app/menu, the report forms, the Field Service job buttons, and the review/quotation workflow.
+
+The `field_service_mobile_connector` addon adds:
 
 - mobile access tokens
 - secure JSON endpoints under `/api/mobile/*`
 - duplicate prevention and sync tracking fields on `field.service.road.report`
 
-It does not replace your current report module. It only facilitates Android login, assigned Job download, offline report upload, photos, signatures, and retry-safe syncing into the current `field.service.road.report` records.
+It does not replace the report module. It facilitates Android login, assigned Job download, offline report upload, photos, signatures, and retry-safe syncing into the `field.service.road.report` records.
 
 ## Android App
 

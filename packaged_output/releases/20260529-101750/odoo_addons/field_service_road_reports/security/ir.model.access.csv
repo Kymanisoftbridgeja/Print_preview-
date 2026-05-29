@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_field_service_road_report_user,access.field.service.road.report.user,model_field_service_road_report,base.group_user,1,1,1,0
+access_field_service_road_report_line_user,access.field.service.road.report.line.user,model_field_service_road_report_line,base.group_user,1,1,1,0
+access_field_service_road_report_technician,access.field.service.road.report.technician,model_field_service_road_report,group_service_report_technician,1,1,1,0
+access_field_service_road_report_line_technician,access.field.service.road.report.line.technician,model_field_service_road_report_line,group_service_report_technician,1,1,1,0
+access_field_service_road_report_manager,access.field.service.road.report.manager,model_field_service_road_report,group_service_report_manager,1,1,1,1
+access_field_service_road_report_line_manager,access.field.service.road.report.line.manager,model_field_service_road_report_line,group_service_report_manager,1,1,1,1
