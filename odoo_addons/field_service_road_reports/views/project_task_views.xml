@@ -25,22 +25,7 @@
                     type="object"
                     class="btn-primary"
                     groups="field_service_road_reports.group_service_report_manager"
-                    invisible="latest_road_report_state != 'submitted'"
-                />
-                <button
-                    name="action_reject_road_report"
-                    string="Send Report Back"
-                    type="object"
-                    groups="field_service_road_reports.group_service_report_manager"
-                    invisible="latest_road_report_state not in ('submitted', 'approved')"
-                />
-                <button
-                    name="action_create_road_report_quotation"
-                    string="Create Quotation from Report"
-                    type="object"
-                    class="btn-primary"
-                    groups="field_service_road_reports.group_service_report_manager"
-                    invisible="latest_road_report_state != 'approved'"
+                    invisible="latest_road_report_state != 'completed'"
                 />
             </xpath>
             <xpath expr="//sheet" position="inside">
@@ -67,7 +52,7 @@
                         groups="field_service_road_reports.group_service_report_manager"
                         invisible="submitted_road_report_count == 0"
                     >
-                        <field name="submitted_road_report_count" widget="statinfo" string="Submitted Reports"/>
+                        <field name="submitted_road_report_count" widget="statinfo" string="Completed Reports"/>
                     </button>
                     <button
                         name="action_open_road_report_quotations"
@@ -82,6 +67,33 @@
                 </div>
             </xpath>
             <xpath expr="//notebook" position="inside">
+                <page string="Service Details">
+                    <group string="Customer">
+                        <group>
+                            <field name="partner_id"/>
+                            <field name="service_contact_id"/>
+                            <field name="service_address"/>
+                        </group>
+                        <group>
+                            <field name="service_phone"/>
+                            <field name="service_email"/>
+                            <field name="service_po_reference"/>
+                            <field name="service_type"/>
+                        </group>
+                    </group>
+                    <group string="Products / Services / Items to Bring">
+                        <field name="planned_item_line_ids" nolabel="1">
+                            <list editable="bottom">
+                                <field name="sequence" widget="handle"/>
+                                <field name="product_id"/>
+                                <field name="name"/>
+                                <field name="quantity"/>
+                                <field name="invoiceable"/>
+                                <field name="notes"/>
+                            </list>
+                        </field>
+                    </group>
+                </page>
                 <page string="Service Reports" groups="field_service_road_reports.group_service_report_technician,field_service_road_reports.group_service_report_manager">
                     <field
                         name="road_report_ids"

@@ -4,9 +4,9 @@ Odoo 19 addon for recording driver or technician service reports from the road.
 
 The module adds a service-report workflow on top of Odoo Field Service.
 
-Backend users create the normal Field Service job and assign it to a technician.
-The technician opens the assigned job and clicks **Start Service Report**. The
-report is linked to the job, customer, and technician.
+Backend users create the normal Field Service job, select the customer/contact,
+service type, and products/services/items to bring, then assign it to a
+technician. Saving the job automatically creates the linked Service Report.
 
 Technicians also have **Service Reports > My Reports** to review their own
 reports. Reports are not started as standalone records; they are started from
@@ -18,13 +18,17 @@ voltage, UPS system down, battery manufacturer/type, battery rating/quantity,
 problem/service rendered, defects found, corrective action, recommendations,
 technicians on-site, service status/departure time, customer name, and new parts.
 
-Technicians can complete draft reports and click **Submit for Review**. Submitted
-reports are locked for technicians. Reviewers can approve or send reports back for
-correction from the Field Service job. Only approved reports can create
-quotations, also from the Field Service job.
+Technicians open the linked Service Report from the mobile app, complete the
+actual work details, signatures, photos, and actual parts used, then mark the
+report completed. Reviewers approve completed reports from Odoo.
 
-The workflow states are **Draft**, **Submitted / Waiting for Review**,
-**Approved**, **Rejected / Needs Correction**, and **Quotation Created**.
+The business workflow states are **Assigned**, **In Progress**, **Completed**,
+and **Approved**. Mobile sync statuses remain separate: local draft, pending sync,
+synced, and sync failed.
+
+Service Reports do not auto-create quotations or invoices. Reviewers manually
+link a quotation/sales order, invoice, or manual quotation/invoice number on the
+report.
 
 Security groups:
 
@@ -34,8 +38,9 @@ Security groups:
 Core dependencies are `industry_fsm`, `sale_timesheet`, `sale_management`,
 `account`, and `mail`.
 
-Install the addon, assign the security groups, create a Field Service job, and
-use **Start Service Report** on the job.
+Install the addon, assign the security groups, and create a Field Service job
+with a customer. The linked Service Report appears immediately in Service
+Reports.
 
 ## Mobile sync endpoint
 
@@ -44,8 +49,8 @@ The addon exposes a JSON route for the mobile app:
 `POST /field_service_road_reports/mobile/reports`
 
 The request must be authenticated as an Odoo user. The endpoint creates or
-updates a `field.service.road.report`, replaces its mobile-supplied line items,
-stores base64 attachments, and submits the report by default.
+updates a `field.service.road.report`, replaces its mobile-supplied actual items
+used, stores base64 attachments, and completes the report by default.
 
 Example payload:
 
@@ -81,5 +86,5 @@ Example payload:
 }
 ```
 
-Use `submit: false` to leave the created report completed but not submitted.
+Use `submit: false` to save without marking the report completed.
 Use `external_report_number` or `mobile_id` for retry-safe updates.

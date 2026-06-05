@@ -23,6 +23,8 @@
                 <field name="submitted_at"/>
                 <field name="follow_up_task_id" groups="field_service_road_reports.group_service_report_manager"/>
                 <field name="create_invoice" groups="field_service_road_reports.group_service_report_manager"/>
+                <field name="sale_order_id" groups="field_service_road_reports.group_service_report_manager"/>
+                <field name="invoice_id" groups="field_service_road_reports.group_service_report_manager"/>
                 <field name="state"/>
             </list>
         </field>
@@ -34,10 +36,12 @@
         <field name="arch" type="xml">
             <form string="Road Report">
                 <header>
-                    <button name="action_start_service" string="Start" type="object" class="btn-primary" invisible="state not in ('draft', 'assigned', 'rejected', 'completed')"/>
+                    <button name="action_start_service" string="Start" type="object" class="btn-primary" invisible="state not in ('assigned', 'completed')"/>
                     <button name="action_stop_service" string="Stop" type="object" class="btn-primary" invisible="state != 'in_progress'"/>
-                    <button name="action_submit" string="Submit for Review" type="object" class="btn-primary" invisible="state not in ('completed', 'rejected', 'draft', 'assigned')"/>
-                    <field name="state" widget="statusbar" statusbar_visible="draft,assigned,in_progress,completed,submitted,approved,quotation_created"/>
+                    <button name="action_submit" string="Complete" type="object" class="btn-primary" invisible="state not in ('assigned', 'in_progress', 'completed')"/>
+                    <button name="action_approve" string="Approve" type="object" class="btn-primary" groups="field_service_road_reports.group_service_report_manager" invisible="state != 'completed'"/>
+                    <button name="action_reset_to_assigned" string="Reset to Assigned" type="object" groups="field_service_road_reports.group_service_report_manager" invisible="state not in ('completed', 'approved')"/>
+                    <field name="state" widget="statusbar" statusbar_visible="assigned,in_progress,completed,approved"/>
                 </header>
                 <sheet>
                     <div name="button_box" class="oe_button_box">
@@ -148,10 +152,25 @@
                                 <field name="attachment_ids" widget="many2many_binary" nolabel="1"/>
                             </group>
                         </page>
-                        <page string="New Parts">
-                            <field name="line_ids">
+                        <page string="Planned Products / Services">
+                            <field name="planned_line_ids" context="{'default_line_type': 'planned'}">
                                 <list editable="bottom">
                                     <field name="sequence" widget="handle"/>
+                                    <field name="line_type" column_invisible="1"/>
+                                    <field name="product_id"/>
+                                    <field name="name"/>
+                                    <field name="quantity"/>
+                                    <field name="uom_id"/>
+                                    <field name="invoiceable"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Actual Parts / Items Used">
+                            <field name="actual_line_ids" context="{'default_line_type': 'actual'}">
+                                <list editable="bottom">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="line_type" column_invisible="1"/>
                                     <field name="product_id"/>
                                     <field name="name"/>
                                     <field name="serial_number"/>
@@ -162,6 +181,18 @@
                                     <field name="notes"/>
                                 </list>
                             </field>
+                        </page>
+                        <page string="Quotation / Invoice Links" groups="field_service_road_reports.group_service_report_manager">
+                            <group>
+                                <group>
+                                    <field name="sale_order_id"/>
+                                    <field name="manual_quotation_number"/>
+                                </group>
+                                <group>
+                                    <field name="invoice_id"/>
+                                    <field name="manual_invoice_number"/>
+                                </group>
+                            </group>
                         </page>
                         <page string="Signatures">
                             <group>
@@ -193,8 +224,8 @@
                 <field name="report_company_name"/>
                 <field name="driver_id"/>
                 <field name="field_service_job_id"/>
-                <filter string="Submitted" name="submitted" domain="[('state', '=', 'submitted')]"/>
-                <filter string="Submitted from Mobile" name="submitted_mobile" domain="[('source', '=', 'mobile'), ('state', '=', 'submitted')]"/>
+                <filter string="Completed" name="completed" domain="[('state', '=', 'completed')]"/>
+                <filter string="Completed from Mobile" name="submitted_mobile" domain="[('source', '=', 'mobile'), ('state', '=', 'completed')]"/>
                 <filter string="Emergency / Unscheduled" name="emergency_mobile" domain="[('source', '=', 'mobile'), ('field_service_job_id', '=', False)]"/>
                 <filter string="Linked to Job" name="linked_to_job" domain="[('field_service_job_id', '!=', False)]"/>
                 <filter string="Approved" name="approved" domain="[('state', '=', 'approved')]"/>
@@ -212,11 +243,11 @@
     </record>
 
     <record id="action_field_service_road_report_submitted_mobile" model="ir.actions.act_window">
-        <field name="name">Submitted from Mobile</field>
+        <field name="name">Completed from Mobile</field>
         <field name="res_model">field.service.road.report</field>
         <field name="view_mode">list,form</field>
         <field name="view_id" ref="view_field_service_road_report_list"/>
-        <field name="domain">[('source', '=', 'mobile'), ('state', '=', 'submitted')]</field>
+        <field name="domain">[('source', '=', 'mobile'), ('state', '=', 'completed')]</field>
         <field name="context">{'search_default_submitted_mobile': 1}</field>
     </record>
 
@@ -270,7 +301,7 @@
     />
     <menuitem
         id="menu_service_reports_review"
-        name="Submitted from Mobile"
+        name="Completed from Mobile"
         parent="menu_service_reports_app_root"
         action="action_field_service_road_report_submitted_mobile"
         groups="field_service_road_reports.group_service_report_manager"

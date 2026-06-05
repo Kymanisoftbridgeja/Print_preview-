@@ -147,21 +147,21 @@ private fun HomeScreen(
             JobCard(job, onOpenJob)
         }
         item { SectionTitle("My Service Reports") }
-        val myReports = reports.filter { it.syncStatus == "Synced" && it.state !in setOf("submitted", "approved", "quotation_created") }
+        val myReports = reports.filter { it.syncStatus == "Synced" && it.state in setOf("assigned", "in_progress") }
         if (myReports.isEmpty()) item { Text("No active Service Reports synced yet.") }
         items(myReports) { report -> ReportCard(report, onOpenReport) }
-        item { SectionTitle("Draft Reports") }
-        val draftReports = reports.filter { it.state in setOf("draft", "assigned", "in_progress", "completed", "rejected") && it.syncStatus != "Pending Sync" }
-        if (draftReports.isEmpty()) item { Text("No draft reports.") }
+        item { SectionTitle("Completed Reports") }
+        val draftReports = reports.filter { it.state == "completed" && it.syncStatus != "Pending Sync" }
+        if (draftReports.isEmpty()) item { Text("No completed reports.") }
         items(draftReports) { report -> ReportCard(report, onOpenReport) }
         item { SectionTitle("Pending Sync") }
         val pendingReports = reports.filter { it.syncStatus in setOf("Pending Sync", "Sync Failed", "Syncing") }
         if (pendingReports.isEmpty()) item { Text("No reports waiting to sync.") }
         items(pendingReports) { report -> ReportCard(report, onOpenReport) }
-        item { SectionTitle("Submitted Reports") }
-        val submittedReports = reports.filter { it.state == "submitted" }
-        if (submittedReports.isEmpty()) item { Text("No submitted reports.") }
-        items(submittedReports) { report -> ReportCard(report, onOpenReport) }
+        item { SectionTitle("Approved Reports") }
+        val approvedReports = reports.filter { it.state == "approved" }
+        if (approvedReports.isEmpty()) item { Text("No approved reports.") }
+        items(approvedReports) { report -> ReportCard(report, onOpenReport) }
         item { SectionTitle("Emergency Reports") }
         val emergencyReports = reports.filter { it.jobId == null }
         if (emergencyReports.isEmpty()) item { Text("No emergency reports.") }
@@ -235,16 +235,18 @@ private fun ReportScreen(
             onAddPhoto(report.localId, uri.toString())
         }
     }
-    val lockedSyncedReport = report.state in setOf("submitted", "approved", "quotation_created") &&
+    val lockedSyncedReport = report.state == "approved" &&
         report.syncStatus == "Synced"
     val canEdit = !lockedSyncedReport
-    val canStartStop = report.state !in setOf("submitted", "approved", "quotation_created") &&
+    val canStartStop = report.state != "approved" &&
         report.syncStatus != "Syncing"
-    val submitLabel = if (report.state == "submitted" && report.syncStatus != "Synced") {
-        "Retry Submit"
+    val submitLabel = if (report.state == "completed" && report.syncStatus != "Synced") {
+        "Retry Complete"
     } else {
-        "Submit Report"
+        "Complete Report"
     }
+    val plannedParts = parts.filter { it.conditionType == "planned" }
+    val actualParts = parts.filter { it.conditionType != "planned" }
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -270,7 +272,7 @@ private fun ReportScreen(
                 }
             }
             if (lockedSyncedReport) {
-                Text("Submitted reports are waiting for backend review. A reviewer must send it back before technicians can edit it.")
+                Text("Approved reports are locked by backend review.")
             }
             if (report.syncError.isNotBlank()) Text(report.syncError, color = MaterialTheme.colorScheme.error)
             if (message.isNotBlank()) Text(message)
@@ -315,8 +317,17 @@ private fun ReportScreen(
         item { Field(draft.techniciansOnSite, { draft = draft.copy(techniciansOnSite = it) }, "Technicians On-Site") }
         item { Field(draft.statusOfService, { draft = draft.copy(statusOfService = it) }, "Status of Service") }
 
-        item { SectionTitle("Parts Used") }
-        items(parts) {
+        item { SectionTitle("Planned Products / Services") }
+        if (plannedParts.isEmpty()) item { Text("No planned products or services.") }
+        items(plannedParts) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("${it.partName}  |  Qty ${it.quantity}")
+                Text(it.notes)
+            }
+        }
+
+        item { SectionTitle("Actual Parts / Items Used") }
+        items(actualParts) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("${it.partName}  |  ${it.serialNumber}  |  Qty ${it.quantity}")
                 OutlinedButton(onClick = { onRemovePart(it.id) }) { Text("Remove") }

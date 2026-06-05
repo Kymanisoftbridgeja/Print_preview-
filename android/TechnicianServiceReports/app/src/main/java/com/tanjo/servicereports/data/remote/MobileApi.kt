@@ -170,6 +170,7 @@ data class ServiceReportDto(
     @Json(name = "status_of_service") val statusOfService: String? = null,
     val state: String? = null,
     @Json(name = "labor_hours") val laborHours: Double? = null,
+    @Json(name = "planned_lines") val plannedLines: List<PartDto> = emptyList(),
     val lines: List<PartDto> = emptyList()
 )
 
@@ -234,7 +235,7 @@ data class PartDto(
     @Json(name = "part_name") val partName: String = "",
     @Json(name = "serial_number") val serialNumber: String = "",
     val quantity: Double = 1.0,
-    @Json(name = "line_type") val lineType: String = "part",
+    @Json(name = "line_type") val lineType: String = "actual",
     val invoiceable: Boolean = true,
     val notes: String = ""
 )

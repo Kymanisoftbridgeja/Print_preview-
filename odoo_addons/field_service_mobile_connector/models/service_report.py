@@ -45,16 +45,16 @@ class FieldServiceRoadReport(models.Model):
             return
         if self.env.user.has_group("field_service_road_reports.group_service_report_manager"):
             return
-        allowed_submitted_write = set(vals) <= {"state"} and vals.get("state") == "submitted"
-        if allowed_submitted_write:
+        allowed_submitted_write = set(vals) <= {"state"} and vals.get("state") == "completed"
+        if allowed_submitted_write and not any(report.state == "approved" for report in self):
             return
-        editable_states = ("draft", "assigned", "in_progress", "completed", "rejected")
+        editable_states = ("assigned", "in_progress", "completed")
         locked = self.filtered(lambda report: report.state not in editable_states)
         if locked:
             raise UserError(
                 _(
-                    "Submitted reports cannot be edited by technicians. "
-                    "Ask a reviewer to send it back for correction."
+                    "Approved reports cannot be edited by technicians. "
+                    "Ask a reviewer to reset it to Assigned if correction is needed."
                 )
             )
 
@@ -67,7 +67,7 @@ class FieldServiceRoadReportLine(models.Model):
             return
         if self.env.user.has_group("field_service_road_reports.group_service_report_manager"):
             return
-        editable_states = ("draft", "assigned", "in_progress", "completed", "rejected")
+        editable_states = ("assigned", "in_progress", "completed")
         locked = self.filtered(lambda line: line.report_id.state not in editable_states)
         if locked:
-            raise AccessError(_("Submitted report lines cannot be edited by technicians."))
+            raise AccessError(_("Approved report lines cannot be edited by technicians."))

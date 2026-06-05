@@ -17,7 +17,7 @@ class FieldServiceRoadReportMobileApi(http.Controller):
     def submit_report(self, **kwargs):
         payload = self._json_payload(kwargs)
         report = self._create_or_update_report(payload)
-        if payload.get("submit", True) and report.state != "submitted":
+        if payload.get("submit", True) and report.state != "completed":
             report.action_submit()
         return {
             "ok": True,
@@ -166,13 +166,14 @@ class FieldServiceRoadReportMobileApi(http.Controller):
     def _replace_report_lines(self, report, lines):
         if not isinstance(lines, list):
             return
-        report.line_ids.with_context(service_report_skip_lock=True).unlink()
+        report.actual_line_ids.with_context(service_report_skip_lock=True).unlink()
         for index, line in enumerate(lines):
             if not isinstance(line, dict):
                 continue
             values = {
                 "report_id": report.id,
                 "sequence": line.get("sequence", (index + 1) * 10),
+                "line_type": "actual",
                 "name": line.get("name") or line.get("part_name") or "Part / Service",
                 "serial_number": line.get("serial_number"),
                 "quantity": line.get("quantity", 1.0),

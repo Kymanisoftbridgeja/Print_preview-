@@ -64,7 +64,7 @@ data class ServiceReportEntity(
     val technicianSignaturePath: String = "",
     val technicianName: String = "",
     val signatureDateTime: String = "",
-    val state: String = "draft",
+    val state: String = "assigned",
     val syncStatus: String = "Local Draft",
     val syncError: String = ""
 )

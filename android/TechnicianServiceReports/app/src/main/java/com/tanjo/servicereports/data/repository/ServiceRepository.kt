@@ -107,7 +107,7 @@ class ServiceRepository(context: Context) {
             val existing = remote.id.asLongOrNull()?.let { dao.reportForOdooId(it) }
             val local = remote.toEntity(existing, null)
             dao.upsertReport(local)
-            replaceParts(local.localId, remote.lines)
+            replaceParts(local.localId, remote.plannedLines, remote.lines)
         }
         return response.message?.takeIf { it.isNotBlank() } ?: "${response.reports.size} Service Reports synced"
     }
@@ -121,7 +121,7 @@ class ServiceRepository(context: Context) {
             }
             val local = response.report.toEntity(existing, job)
             dao.upsertReport(local)
-            replaceParts(local.localId, response.report.lines)
+            replaceParts(local.localId, response.report.plannedLines, response.report.lines)
             local
         } catch (error: Throwable) {
             Log.w(TAG, "Unable to load report from Odoo; using local copy", error)
@@ -232,7 +232,7 @@ class ServiceRepository(context: Context) {
 
     suspend fun submitReport(report: ServiceReportEntity): String {
         validateForSubmit(report)
-        val pending = report.copy(state = "submitted", syncStatus = "Pending Sync", syncError = "")
+        val pending = report.copy(state = "completed", syncStatus = "Pending Sync", syncError = "")
         dao.upsertReport(pending)
         return try {
             val dto = pending.toDto(submit = true)
@@ -247,7 +247,7 @@ class ServiceRepository(context: Context) {
             val synced = response.report.toEntity(pending, null).copy(syncStatus = "Synced", syncError = "")
             dao.upsertReport(synced)
             uploadAttachments(synced, synced.odooId ?: response.report.id.asLongOrNull() ?: 0L)
-            response.message ?: "Service report submitted successfully"
+            response.message ?: "Service report completed successfully"
         } catch (error: Throwable) {
             val status = if (error is IOException) "Pending Sync" else "Sync Failed"
             val errorText = readableError(error)
@@ -260,7 +260,7 @@ class ServiceRepository(context: Context) {
         val pending = dao.pendingReports()
         if (pending.isEmpty()) return
         pending.forEach { dao.upsertReport(it.copy(syncStatus = "Syncing", syncError = "")) }
-        val response = runRemote("bulk-sync") { api().sync(bearer(), SyncRequest(pending.map { it.toDto(submit = it.state == "submitted") })) }
+        val response = runRemote("bulk-sync") { api().sync(bearer(), SyncRequest(pending.map { it.toDto(submit = it.state == "completed") })) }
         if (response.success == false) throw IllegalStateException(response.error ?: "Odoo rejected the sync request.")
         response.results.forEach { result ->
             pending.firstOrNull { it.mobileExternalId == result.mobileExternalId }?.let { report ->
@@ -316,15 +316,29 @@ class ServiceRepository(context: Context) {
         }
     }
 
-    private suspend fun replaceParts(localId: String, lines: List<PartDto>) {
+    private suspend fun replaceParts(localId: String, plannedLines: List<PartDto>, actualLines: List<PartDto>) {
         dao.deletePartsForReport(localId)
-        lines.forEach {
+        plannedLines.forEach {
             dao.upsertPart(
                 PartEntity(
                     reportLocalId = localId,
                     partName = it.partName,
                     serialNumber = it.serialNumber,
                     quantity = it.quantity,
+                    conditionType = "planned",
+                    invoiceable = it.invoiceable,
+                    notes = it.notes
+                )
+            )
+        }
+        actualLines.forEach {
+            dao.upsertPart(
+                PartEntity(
+                    reportLocalId = localId,
+                    partName = it.partName,
+                    serialNumber = it.serialNumber,
+                    quantity = it.quantity,
+                    conditionType = "actual",
                     invoiceable = it.invoiceable,
                     notes = it.notes
                 )
@@ -342,8 +356,8 @@ class ServiceRepository(context: Context) {
     }
 
     private suspend fun ServiceReportEntity.toDto(submit: Boolean): ReportDto {
-        val parts = dao.partsForReport(localId).map {
-            PartDto(it.partName, it.serialNumber, it.quantity, "part", it.invoiceable, it.notes)
+        val parts = dao.partsForReport(localId).filter { it.conditionType != "planned" }.map {
+            PartDto(it.partName, it.serialNumber, it.quantity, "actual", it.invoiceable, it.notes)
         }
         return ReportDto(
             id = odooId,
@@ -386,7 +400,7 @@ class ServiceRepository(context: Context) {
             customerSignatureBase64 = customerSignaturePath,
             technicianSignatureBase64 = technicianSignaturePath,
             technicianName = technicianName,
-            state = if (submit) "submitted" else state,
+            state = if (submit) "completed" else state,
             submit = submit,
             parts = parts
         )
@@ -435,7 +449,7 @@ class ServiceRepository(context: Context) {
             technicianSignaturePath = existing?.technicianSignaturePath.orEmpty(),
             technicianName = technicianName ?: technician ?: existing?.technicianName ?: prefs.getString("technician_name", "").orEmpty(),
             signatureDateTime = existing?.signatureDateTime.orEmpty(),
-            state = state ?: existing?.state ?: "draft",
+            state = state ?: existing?.state ?: "assigned",
             syncStatus = "Synced",
             syncError = ""
         )

@@ -113,6 +113,7 @@ class ServiceReportViewModel(app: Application) : AndroidViewModel(app) {
                 partName = partName,
                 serialNumber = serialNumber,
                 quantity = quantity,
+                conditionType = "actual",
                 invoiceable = invoiceable
             )
         )

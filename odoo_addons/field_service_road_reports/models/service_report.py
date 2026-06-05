@@ -39,7 +39,7 @@ class FieldServiceRoadReport(models.Model):
         required=True,
         tracking=True,
     )
-    submitted_from_mobile = fields.Boolean(copy=False, tracking=True)
+    submitted_from_mobile = fields.Boolean(string="Completed From Mobile", copy=False, tracking=True)
     mobile_external_id = fields.Char(index=True, copy=False)
     mobile_sync_status = fields.Selection(
         [
@@ -60,14 +60,14 @@ class FieldServiceRoadReport(models.Model):
         copy=False,
     )
     submitted_date = fields.Datetime(
-        string="Submitted Date",
+        string="Completed Date",
         related="submitted_at",
         store=True,
         readonly=False,
     )
     submitted_by = fields.Many2one(
         "res.users",
-        string="Submitted By",
+        string="Completed By",
         readonly=True,
         copy=False,
     )
@@ -188,7 +188,7 @@ class FieldServiceRoadReport(models.Model):
         tracking=True,
     )
     create_invoice = fields.Boolean(
-        string="Create Invoice",
+        string="Invoice Required",
         tracking=True,
     )
     timesheet_id = fields.Many2one(
@@ -200,9 +200,16 @@ class FieldServiceRoadReport(models.Model):
     sale_order_id = fields.Many2one(
         "sale.order",
         string="Quotation / Sales Order",
-        readonly=True,
         copy=False,
     )
+    invoice_id = fields.Many2one(
+        "account.move",
+        string="Invoice Reference",
+        copy=False,
+        domain="[('move_type', 'in', ('out_invoice', 'out_refund'))]",
+    )
+    manual_quotation_number = fields.Char(string="Manual Quotation Number")
+    manual_invoice_number = fields.Char(string="Manual Invoice Number")
     invoice_ids = fields.Many2many(
         "account.move",
         compute="_compute_invoice_ids",
@@ -213,6 +220,20 @@ class FieldServiceRoadReport(models.Model):
         "field.service.road.report.line",
         "report_id",
         string="Materials and Time",
+    )
+    planned_line_ids = fields.One2many(
+        "field.service.road.report.line",
+        "report_id",
+        string="Planned Products / Services",
+        domain=[("line_type", "=", "planned")],
+        context={"default_line_type": "planned"},
+    )
+    actual_line_ids = fields.One2many(
+        "field.service.road.report.line",
+        "report_id",
+        string="Actual Parts / Items Used",
+        domain=[("line_type", "=", "actual")],
+        context={"default_line_type": "actual"},
     )
     driver_signature = fields.Binary(attachment=True)
     customer_signature = fields.Binary(attachment=True)
@@ -231,22 +252,17 @@ class FieldServiceRoadReport(models.Model):
     )
     state = fields.Selection(
         [
-            ("draft", "Draft"),
             ("assigned", "Assigned"),
             ("in_progress", "In Progress"),
             ("completed", "Completed"),
-            ("submitted", "Submitted / Waiting for Review"),
             ("approved", "Approved"),
-            ("rejected", "Rejected / Needs Correction"),
-            ("quotation_created", "Quotation Created"),
-            ("cancelled", "Cancelled"),
         ],
-        default="draft",
+        default="assigned",
         required=True,
         tracking=True,
     )
     submitted_at = fields.Datetime(
-        string="Submitted At",
+        string="Completed At",
         readonly=True,
         copy=False,
         tracking=True,
@@ -264,22 +280,22 @@ class FieldServiceRoadReport(models.Model):
             if vals.get("field_service_job_id") and not vals.get("task_id"):
                 vals["task_id"] = vals["field_service_job_id"]
             if vals.get("source") == "mobile":
-                vals.setdefault("submitted_from_mobile", vals.get("state") == "submitted")
+                vals.setdefault("submitted_from_mobile", vals.get("state") == "completed")
                 vals.setdefault("mobile_sync_status", "synced")
         reports = super().create(vals_list)
-        submitted_reports = reports.filtered(lambda report: report.state == "submitted")
+        submitted_reports = reports.filtered(lambda report: report.state == "completed")
         if submitted_reports:
             submitted_reports._sync_submission_to_task()
         return reports
 
     def write(self, vals):
         was_submitted = {
-            report.id: report.state == "submitted"
+            report.id: report.state == "completed"
             for report in self
         }
         if vals.get("field_service_job_id") and not vals.get("task_id"):
             vals["task_id"] = vals["field_service_job_id"]
-        if vals.get("state") == "submitted":
+        if vals.get("state") == "completed":
             vals.setdefault("submitted_by", self.env.user.id)
             vals.setdefault("submitted_at", fields.Datetime.now())
             if vals.get("source") == "mobile" or any(report.source == "mobile" for report in self):
@@ -287,11 +303,11 @@ class FieldServiceRoadReport(models.Model):
         if not self.env.context.get("service_report_skip_lock"):
             self._check_write_allowed(vals)
         result = super().write(vals)
-        if vals.get("state") == "submitted" or (
-            vals.get("task_id") and any(report.state == "submitted" for report in self)
+        if vals.get("state") == "completed" or (
+            vals.get("task_id") and any(report.state == "completed" for report in self)
         ):
             newly_submitted = self.filtered(
-                lambda report: report.state == "submitted"
+                lambda report: report.state == "completed"
                 and (not was_submitted.get(report.id) or vals.get("task_id"))
             )
             newly_submitted._sync_submission_to_task()
@@ -317,6 +333,15 @@ class FieldServiceRoadReport(models.Model):
             if task.partner_id:
                 report.customer_id = task.partner_id
                 report._apply_customer_values(task.partner_id)
+            if task.service_contact_id:
+                report.customer_id = task.service_contact_id
+                report._apply_customer_values(task.service_contact_id)
+            report.purchase_order = task.service_po_reference
+            report.service_type = (
+                dict(task._fields["service_type"].selection).get(task.service_type, "")
+                if task.service_type
+                else ""
+            )
             if not report.issue_reported:
                 report.issue_reported = task.description or ""
 
@@ -328,12 +353,12 @@ class FieldServiceRoadReport(models.Model):
                 continue
             report._apply_customer_values(customer)
 
-    @api.depends("sale_order_id")
+    @api.depends("sale_order_id", "invoice_id")
     def _compute_invoice_ids(self):
         AccountMove = self.env["account.move"]
         for report in self:
-            invoices = AccountMove.browse()
-            if report.sale_order_id:
+            invoices = report.invoice_id
+            if not invoices and report.sale_order_id:
                 invoices = report.sale_order_id.invoice_ids
             report.invoice_ids = invoices
             report.invoice_count = len(invoices)
@@ -359,8 +384,8 @@ class FieldServiceRoadReport(models.Model):
 
     def action_submit(self):
         for report in self:
-            if report.state not in ("completed", "rejected", "draft", "assigned"):
-                raise UserError(_("Only completed, draft, or rejected reports can be submitted."))
+            if report.state not in ("assigned", "in_progress", "completed"):
+                raise UserError(_("Only assigned, in-progress, or completed reports can be completed."))
             signature_values = {}
             now = fields.Datetime.now()
             if report.customer_signature and not report.customer_signed_at:
@@ -371,7 +396,7 @@ class FieldServiceRoadReport(models.Model):
                 report.with_context(service_report_skip_lock=True).write(signature_values)
         self.with_context(service_report_skip_lock=True).write(
             {
-                "state": "submitted",
+                "state": "completed",
                 "submitted_at": fields.Datetime.now(),
                 "submitted_by": self.env.user.id,
                 "sync_state": "synced",
@@ -381,8 +406,8 @@ class FieldServiceRoadReport(models.Model):
 
     def action_start_service(self):
         for report in self:
-            if report.state not in ("draft", "assigned", "rejected", "completed"):
-                raise UserError(_("Only draft or rejected reports can be started."))
+            if report.state not in ("assigned", "completed"):
+                raise UserError(_("Only assigned or completed reports can be started."))
             now = fields.Datetime.now()
             values = {
                 "start_datetime": now,
@@ -412,24 +437,23 @@ class FieldServiceRoadReport(models.Model):
     def action_approve(self):
         self._check_manager()
         for report in self:
-            if report.state != "submitted":
-                raise UserError(_("Only submitted reports can be approved."))
+            if report.state != "completed":
+                raise UserError(_("Only completed reports can be approved."))
         self.write({"state": "approved"})
 
     def action_reject(self):
-        self._check_manager()
-        for report in self:
-            if report.state not in ("submitted", "approved"):
-                raise UserError(_("Only submitted or approved reports can be sent back."))
-        self.write({"state": "rejected"})
+        self.action_reset_to_assigned()
 
     def action_reset_to_draft(self):
+        self.action_reset_to_assigned()
+
+    def action_reset_to_assigned(self):
         self._check_manager()
-        self.write({"state": "draft"})
+        self.write({"state": "assigned"})
 
     def action_cancel(self):
         self._check_manager()
-        self.write({"state": "cancelled"})
+        raise UserError(_("Cancel is no longer part of the simplified service report workflow."))
 
     def action_create_timesheet(self):
         self._check_manager()
@@ -466,42 +490,10 @@ class FieldServiceRoadReport(models.Model):
         return True
 
     def action_create_sale_order(self):
-        self._check_manager()
-        for report in self:
-            if report.state != "approved":
-                raise UserError(_("Approve the service report before creating a quotation."))
-            invoice_lines = report.line_ids.filtered(lambda line: line.invoiceable)
-            if not invoice_lines:
-                raise UserError(_("Add at least one invoiceable material or service line."))
-            if not report.customer_id:
-                raise UserError(_("Select a customer before creating a quotation."))
-
-            order = report.sale_order_id
-            if order and order.state not in ("draft", "sent"):
-                raise UserError(
-                    _("Only draft quotations can be updated from a road report.")
-                )
-            if order:
-                order.write(report._prepare_sale_order_values())
-            else:
-                order = self.env["sale.order"].create(report._prepare_sale_order_values())
-                report.sale_order_id = order
-            report._sync_sale_order_lines(order, invoice_lines)
-            report.state = "quotation_created"
-        return True
+        raise UserError(_("Quotations are no longer auto-created from Service Reports. Link the quotation manually on the report."))
 
     def action_create_invoice(self):
-        self._check_manager()
-        for report in self:
-            if not report.sale_order_id:
-                report.action_create_sale_order()
-            order = report.sale_order_id
-            if order.state in ("draft", "sent"):
-                order.action_confirm()
-            invoices = order._create_invoices()
-            if not invoices:
-                raise UserError(_("Odoo did not find invoiceable lines for this report."))
-        return self.action_open_invoices()
+        raise UserError(_("Invoices are no longer auto-created from Service Reports. Link the invoice manually on the report."))
 
     def action_create_follow_up_task(self):
         self._check_manager()
@@ -524,7 +516,7 @@ class FieldServiceRoadReport(models.Model):
             if "is_fsm" in Task._fields:
                 values["is_fsm"] = True
             task = Task.create(values)
-            report.write({"follow_up_task_id": task.id, "task_id": task.id})
+            report.write({"follow_up_task_id": task.id})
         return True
 
     def action_open_follow_up_task(self):
@@ -700,7 +692,7 @@ class FieldServiceRoadReport(models.Model):
             if values:
                 report.with_context(service_report_skip_lock=True).write(values)
             report.task_id.message_post(
-                body=_("Service report %(report)s was submitted and is ready for review.")
+                body=_("Service report %(report)s was completed and is ready for review.")
                 % {"report": report.display_name},
                 subtype_xmlid="mail.mt_note",
             )
@@ -726,14 +718,14 @@ class FieldServiceRoadReport(models.Model):
             "field_service_road_reports.group_service_report_manager"
         ):
             return
-        allowed_submitted_write = set(vals) <= {"state"} and vals.get("state") == "submitted"
-        if allowed_submitted_write:
+        allowed_submitted_write = set(vals) <= {"state"} and vals.get("state") == "completed"
+        if allowed_submitted_write and not any(report.state == "approved" for report in self):
             return
-        editable_states = ("draft", "assigned", "in_progress", "completed", "rejected")
+        editable_states = ("assigned", "in_progress", "completed")
         locked = self.filtered(lambda report: report.state not in editable_states)
         if locked:
             raise UserError(
-                _("Submitted reports cannot be edited by technicians. Ask a reviewer to send it back for correction.")
+                _("Approved reports cannot be edited by technicians. Ask a reviewer to reset it to Assigned if correction is needed.")
             )
 
 
@@ -743,13 +735,21 @@ class FieldServiceRoadReportLine(models.Model):
     _order = "sequence, id"
 
     sequence = fields.Integer(default=10)
+    line_type = fields.Selection(
+        [
+            ("planned", "Planned"),
+            ("actual", "Actual"),
+        ],
+        default="actual",
+        required=True,
+    )
     report_id = fields.Many2one(
         "field.service.road.report",
         required=True,
         ondelete="cascade",
     )
     product_id = fields.Many2one("product.product", string="Product / Service")
-    name = fields.Char(string="Part Name", required=True)
+    name = fields.Char(string="Description", required=True)
     serial_number = fields.Char(string="Serial #")
     quantity = fields.Float(default=1.0)
     uom_id = fields.Many2one("uom.uom", string="Unit")
@@ -804,11 +804,11 @@ class FieldServiceRoadReportLine(models.Model):
             "field_service_road_reports.group_service_report_manager"
         ):
             return
-        editable_states = ("draft", "in_progress", "completed", "rejected")
+        editable_states = ("assigned", "in_progress", "completed")
         locked = self.filtered(lambda line: line.report_id.state not in editable_states)
         if locked:
             raise UserError(
-                _("Submitted report lines cannot be edited by technicians.")
+                _("Approved report lines cannot be edited by technicians.")
             )
 
 
