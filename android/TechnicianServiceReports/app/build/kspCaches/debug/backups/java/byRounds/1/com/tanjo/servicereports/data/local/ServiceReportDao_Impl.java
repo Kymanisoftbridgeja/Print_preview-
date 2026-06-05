@@ -760,6 +760,181 @@ public final class ServiceReportDao_Impl implements ServiceReportDao {
   }
 
   @Override
+  public Flow<List<ServiceReportEntity>> observeReports() {
+    final String _sql = "select * from service_reports order by serviceDate desc, reportNumber desc";
+    final RoomSQLiteQuery _statement = RoomSQLiteQuery.acquire(_sql, 0);
+    return CoroutinesRoom.createFlow(__db, false, new String[] {"service_reports"}, new Callable<List<ServiceReportEntity>>() {
+      @Override
+      @NonNull
+      public List<ServiceReportEntity> call() throws Exception {
+        final Cursor _cursor = DBUtil.query(__db, _statement, false, null);
+        try {
+          final int _cursorIndexOfLocalId = CursorUtil.getColumnIndexOrThrow(_cursor, "localId");
+          final int _cursorIndexOfOdooId = CursorUtil.getColumnIndexOrThrow(_cursor, "odooId");
+          final int _cursorIndexOfMobileExternalId = CursorUtil.getColumnIndexOrThrow(_cursor, "mobileExternalId");
+          final int _cursorIndexOfJobId = CursorUtil.getColumnIndexOrThrow(_cursor, "jobId");
+          final int _cursorIndexOfReportNumber = CursorUtil.getColumnIndexOrThrow(_cursor, "reportNumber");
+          final int _cursorIndexOfCustomerId = CursorUtil.getColumnIndexOrThrow(_cursor, "customerId");
+          final int _cursorIndexOfCustomerName = CursorUtil.getColumnIndexOrThrow(_cursor, "customerName");
+          final int _cursorIndexOfCompanyName = CursorUtil.getColumnIndexOrThrow(_cursor, "companyName");
+          final int _cursorIndexOfContactName = CursorUtil.getColumnIndexOrThrow(_cursor, "contactName");
+          final int _cursorIndexOfAddress = CursorUtil.getColumnIndexOrThrow(_cursor, "address");
+          final int _cursorIndexOfServiceDate = CursorUtil.getColumnIndexOrThrow(_cursor, "serviceDate");
+          final int _cursorIndexOfArrivalTime = CursorUtil.getColumnIndexOrThrow(_cursor, "arrivalTime");
+          final int _cursorIndexOfDepartureTime = CursorUtil.getColumnIndexOrThrow(_cursor, "departureTime");
+          final int _cursorIndexOfLaborHours = CursorUtil.getColumnIndexOrThrow(_cursor, "laborHours");
+          final int _cursorIndexOfVehicle = CursorUtil.getColumnIndexOrThrow(_cursor, "vehicle");
+          final int _cursorIndexOfPoReference = CursorUtil.getColumnIndexOrThrow(_cursor, "poReference");
+          final int _cursorIndexOfServiceType = CursorUtil.getColumnIndexOrThrow(_cursor, "serviceType");
+          final int _cursorIndexOfOriginalReportNumber = CursorUtil.getColumnIndexOrThrow(_cursor, "originalReportNumber");
+          final int _cursorIndexOfMake = CursorUtil.getColumnIndexOrThrow(_cursor, "make");
+          final int _cursorIndexOfModel = CursorUtil.getColumnIndexOrThrow(_cursor, "model");
+          final int _cursorIndexOfKva = CursorUtil.getColumnIndexOrThrow(_cursor, "kva");
+          final int _cursorIndexOfEquipmentType = CursorUtil.getColumnIndexOrThrow(_cursor, "equipmentType");
+          final int _cursorIndexOfSerialNumber = CursorUtil.getColumnIndexOrThrow(_cursor, "serialNumber");
+          final int _cursorIndexOfLoad = CursorUtil.getColumnIndexOrThrow(_cursor, "load");
+          final int _cursorIndexOfInputVoltage = CursorUtil.getColumnIndexOrThrow(_cursor, "inputVoltage");
+          final int _cursorIndexOfOutputVoltage = CursorUtil.getColumnIndexOrThrow(_cursor, "outputVoltage");
+          final int _cursorIndexOfSystemDown = CursorUtil.getColumnIndexOrThrow(_cursor, "systemDown");
+          final int _cursorIndexOfBatteryManufacturer = CursorUtil.getColumnIndexOrThrow(_cursor, "batteryManufacturer");
+          final int _cursorIndexOfBatteryType = CursorUtil.getColumnIndexOrThrow(_cursor, "batteryType");
+          final int _cursorIndexOfBatteryRating = CursorUtil.getColumnIndexOrThrow(_cursor, "batteryRating");
+          final int _cursorIndexOfBatteryQuantity = CursorUtil.getColumnIndexOrThrow(_cursor, "batteryQuantity");
+          final int _cursorIndexOfProblemReported = CursorUtil.getColumnIndexOrThrow(_cursor, "problemReported");
+          final int _cursorIndexOfDefectsFound = CursorUtil.getColumnIndexOrThrow(_cursor, "defectsFound");
+          final int _cursorIndexOfCorrectiveAction = CursorUtil.getColumnIndexOrThrow(_cursor, "correctiveAction");
+          final int _cursorIndexOfRecommendations = CursorUtil.getColumnIndexOrThrow(_cursor, "recommendations");
+          final int _cursorIndexOfTechniciansOnSite = CursorUtil.getColumnIndexOrThrow(_cursor, "techniciansOnSite");
+          final int _cursorIndexOfStatusOfService = CursorUtil.getColumnIndexOrThrow(_cursor, "statusOfService");
+          final int _cursorIndexOfCustomerSignaturePath = CursorUtil.getColumnIndexOrThrow(_cursor, "customerSignaturePath");
+          final int _cursorIndexOfTechnicianSignaturePath = CursorUtil.getColumnIndexOrThrow(_cursor, "technicianSignaturePath");
+          final int _cursorIndexOfTechnicianName = CursorUtil.getColumnIndexOrThrow(_cursor, "technicianName");
+          final int _cursorIndexOfSignatureDateTime = CursorUtil.getColumnIndexOrThrow(_cursor, "signatureDateTime");
+          final int _cursorIndexOfState = CursorUtil.getColumnIndexOrThrow(_cursor, "state");
+          final int _cursorIndexOfSyncStatus = CursorUtil.getColumnIndexOrThrow(_cursor, "syncStatus");
+          final int _cursorIndexOfSyncError = CursorUtil.getColumnIndexOrThrow(_cursor, "syncError");
+          final List<ServiceReportEntity> _result = new ArrayList<ServiceReportEntity>(_cursor.getCount());
+          while (_cursor.moveToNext()) {
+            final ServiceReportEntity _item;
+            final String _tmpLocalId;
+            _tmpLocalId = _cursor.getString(_cursorIndexOfLocalId);
+            final Long _tmpOdooId;
+            if (_cursor.isNull(_cursorIndexOfOdooId)) {
+              _tmpOdooId = null;
+            } else {
+              _tmpOdooId = _cursor.getLong(_cursorIndexOfOdooId);
+            }
+            final String _tmpMobileExternalId;
+            _tmpMobileExternalId = _cursor.getString(_cursorIndexOfMobileExternalId);
+            final Long _tmpJobId;
+            if (_cursor.isNull(_cursorIndexOfJobId)) {
+              _tmpJobId = null;
+            } else {
+              _tmpJobId = _cursor.getLong(_cursorIndexOfJobId);
+            }
+            final String _tmpReportNumber;
+            _tmpReportNumber = _cursor.getString(_cursorIndexOfReportNumber);
+            final Long _tmpCustomerId;
+            if (_cursor.isNull(_cursorIndexOfCustomerId)) {
+              _tmpCustomerId = null;
+            } else {
+              _tmpCustomerId = _cursor.getLong(_cursorIndexOfCustomerId);
+            }
+            final String _tmpCustomerName;
+            _tmpCustomerName = _cursor.getString(_cursorIndexOfCustomerName);
+            final String _tmpCompanyName;
+            _tmpCompanyName = _cursor.getString(_cursorIndexOfCompanyName);
+            final String _tmpContactName;
+            _tmpContactName = _cursor.getString(_cursorIndexOfContactName);
+            final String _tmpAddress;
+            _tmpAddress = _cursor.getString(_cursorIndexOfAddress);
+            final String _tmpServiceDate;
+            _tmpServiceDate = _cursor.getString(_cursorIndexOfServiceDate);
+            final String _tmpArrivalTime;
+            _tmpArrivalTime = _cursor.getString(_cursorIndexOfArrivalTime);
+            final String _tmpDepartureTime;
+            _tmpDepartureTime = _cursor.getString(_cursorIndexOfDepartureTime);
+            final double _tmpLaborHours;
+            _tmpLaborHours = _cursor.getDouble(_cursorIndexOfLaborHours);
+            final String _tmpVehicle;
+            _tmpVehicle = _cursor.getString(_cursorIndexOfVehicle);
+            final String _tmpPoReference;
+            _tmpPoReference = _cursor.getString(_cursorIndexOfPoReference);
+            final String _tmpServiceType;
+            _tmpServiceType = _cursor.getString(_cursorIndexOfServiceType);
+            final String _tmpOriginalReportNumber;
+            _tmpOriginalReportNumber = _cursor.getString(_cursorIndexOfOriginalReportNumber);
+            final String _tmpMake;
+            _tmpMake = _cursor.getString(_cursorIndexOfMake);
+            final String _tmpModel;
+            _tmpModel = _cursor.getString(_cursorIndexOfModel);
+            final String _tmpKva;
+            _tmpKva = _cursor.getString(_cursorIndexOfKva);
+            final String _tmpEquipmentType;
+            _tmpEquipmentType = _cursor.getString(_cursorIndexOfEquipmentType);
+            final String _tmpSerialNumber;
+            _tmpSerialNumber = _cursor.getString(_cursorIndexOfSerialNumber);
+            final String _tmpLoad;
+            _tmpLoad = _cursor.getString(_cursorIndexOfLoad);
+            final String _tmpInputVoltage;
+            _tmpInputVoltage = _cursor.getString(_cursorIndexOfInputVoltage);
+            final String _tmpOutputVoltage;
+            _tmpOutputVoltage = _cursor.getString(_cursorIndexOfOutputVoltage);
+            final boolean _tmpSystemDown;
+            final int _tmp;
+            _tmp = _cursor.getInt(_cursorIndexOfSystemDown);
+            _tmpSystemDown = _tmp != 0;
+            final String _tmpBatteryManufacturer;
+            _tmpBatteryManufacturer = _cursor.getString(_cursorIndexOfBatteryManufacturer);
+            final String _tmpBatteryType;
+            _tmpBatteryType = _cursor.getString(_cursorIndexOfBatteryType);
+            final String _tmpBatteryRating;
+            _tmpBatteryRating = _cursor.getString(_cursorIndexOfBatteryRating);
+            final int _tmpBatteryQuantity;
+            _tmpBatteryQuantity = _cursor.getInt(_cursorIndexOfBatteryQuantity);
+            final String _tmpProblemReported;
+            _tmpProblemReported = _cursor.getString(_cursorIndexOfProblemReported);
+            final String _tmpDefectsFound;
+            _tmpDefectsFound = _cursor.getString(_cursorIndexOfDefectsFound);
+            final String _tmpCorrectiveAction;
+            _tmpCorrectiveAction = _cursor.getString(_cursorIndexOfCorrectiveAction);
+            final String _tmpRecommendations;
+            _tmpRecommendations = _cursor.getString(_cursorIndexOfRecommendations);
+            final String _tmpTechniciansOnSite;
+            _tmpTechniciansOnSite = _cursor.getString(_cursorIndexOfTechniciansOnSite);
+            final String _tmpStatusOfService;
+            _tmpStatusOfService = _cursor.getString(_cursorIndexOfStatusOfService);
+            final String _tmpCustomerSignaturePath;
+            _tmpCustomerSignaturePath = _cursor.getString(_cursorIndexOfCustomerSignaturePath);
+            final String _tmpTechnicianSignaturePath;
+            _tmpTechnicianSignaturePath = _cursor.getString(_cursorIndexOfTechnicianSignaturePath);
+            final String _tmpTechnicianName;
+            _tmpTechnicianName = _cursor.getString(_cursorIndexOfTechnicianName);
+            final String _tmpSignatureDateTime;
+            _tmpSignatureDateTime = _cursor.getString(_cursorIndexOfSignatureDateTime);
+            final String _tmpState;
+            _tmpState = _cursor.getString(_cursorIndexOfState);
+            final String _tmpSyncStatus;
+            _tmpSyncStatus = _cursor.getString(_cursorIndexOfSyncStatus);
+            final String _tmpSyncError;
+            _tmpSyncError = _cursor.getString(_cursorIndexOfSyncError);
+            _item = new ServiceReportEntity(_tmpLocalId,_tmpOdooId,_tmpMobileExternalId,_tmpJobId,_tmpReportNumber,_tmpCustomerId,_tmpCustomerName,_tmpCompanyName,_tmpContactName,_tmpAddress,_tmpServiceDate,_tmpArrivalTime,_tmpDepartureTime,_tmpLaborHours,_tmpVehicle,_tmpPoReference,_tmpServiceType,_tmpOriginalReportNumber,_tmpMake,_tmpModel,_tmpKva,_tmpEquipmentType,_tmpSerialNumber,_tmpLoad,_tmpInputVoltage,_tmpOutputVoltage,_tmpSystemDown,_tmpBatteryManufacturer,_tmpBatteryType,_tmpBatteryRating,_tmpBatteryQuantity,_tmpProblemReported,_tmpDefectsFound,_tmpCorrectiveAction,_tmpRecommendations,_tmpTechniciansOnSite,_tmpStatusOfService,_tmpCustomerSignaturePath,_tmpTechnicianSignaturePath,_tmpTechnicianName,_tmpSignatureDateTime,_tmpState,_tmpSyncStatus,_tmpSyncError);
+            _result.add(_item);
+          }
+          return _result;
+        } finally {
+          _cursor.close();
+        }
+      }
+
+      @Override
+      protected void finalize() {
+        _statement.release();
+      }
+    });
+  }
+
+  @Override
   public Object reportForJob(final long jobId,
       final Continuation<? super ServiceReportEntity> $completion) {
     final String _sql = "select * from service_reports where jobId = ? limit 1";

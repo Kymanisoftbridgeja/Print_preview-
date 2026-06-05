@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_task_form_road_reports" model="ir.ui.view">
+        <field name="name">project.task.form.road.reports</field>
+        <field name="model">project.task</field>
+        <field name="inherit_id" ref="project.view_task_form2"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <button
+                    name="action_start_road_report"
+                    string="Start Service Report"
+                    type="object"
+                    class="btn-primary"
+                    groups="field_service_road_reports.group_service_report_technician"
+                />
+                <button
+                    name="action_open_road_reports"
+                    string="Service Reports"
+                    type="object"
+                    groups="field_service_road_reports.group_service_report_technician,field_service_road_reports.group_service_report_manager"
+                />
+                <button
+                    name="action_approve_road_report"
+                    string="Approve Service Report"
+                    type="object"
+                    class="btn-primary"
+                    groups="field_service_road_reports.group_service_report_manager"
+                    invisible="latest_road_report_state != 'completed'"
+                />
+            </xpath>
+            <xpath expr="//sheet" position="inside">
+                <field name="latest_road_report_state" invisible="1"/>
+                <field name="latest_road_report_sync_state" invisible="1"/>
+                <field name="latest_road_report_submitted_at" invisible="1"/>
+            </xpath>
+            <xpath expr="//sheet" position="inside">
+                <div name="service_report_button_box" class="oe_button_box">
+                    <button
+                        name="action_open_road_reports"
+                        type="object"
+                        class="oe_stat_button"
+                        icon="fa-clipboard"
+                        groups="field_service_road_reports.group_service_report_technician,field_service_road_reports.group_service_report_manager"
+                    >
+                        <field name="road_report_count" widget="statinfo" string="Service Reports"/>
+                    </button>
+                    <button
+                        name="action_open_submitted_road_reports"
+                        type="object"
+                        class="oe_stat_button"
+                        icon="fa-check-square-o"
+                        groups="field_service_road_reports.group_service_report_manager"
+                        invisible="submitted_road_report_count == 0"
+                    >
+                        <field name="submitted_road_report_count" widget="statinfo" string="Completed Reports"/>
+                    </button>
+                    <button
+                        name="action_open_road_report_quotations"
+                        type="object"
+                        class="oe_stat_button"
+                        icon="fa-shopping-cart"
+                        groups="field_service_road_reports.group_service_report_manager"
+                        invisible="road_report_quotation_count == 0"
+                    >
+                        <field name="road_report_quotation_count" widget="statinfo" string="Quotations"/>
+                    </button>
+                </div>
+            </xpath>
+            <xpath expr="//notebook" position="inside">
+                <page string="Service Details">
+                    <group string="Customer">
+                        <group>
+                            <field name="partner_id"/>
+                            <field name="service_contact_id"/>
+                            <field name="service_address"/>
+                        </group>
+                        <group>
+                            <field name="service_phone"/>
+                            <field name="service_email"/>
+                            <field name="service_po_reference"/>
+                            <field name="service_type"/>
+                        </group>
+                    </group>
+                    <group string="Products / Services / Items to Bring">
+                        <field name="planned_item_line_ids" nolabel="1">
+                            <list editable="bottom">
+                                <field name="sequence" widget="handle"/>
+                                <field name="product_id"/>
+                                <field name="name"/>
+                                <field name="quantity"/>
+                                <field name="invoiceable"/>
+                                <field name="notes"/>
+                            </list>
+                        </field>
+                    </group>
+                </page>
+                <page string="Service Reports" groups="field_service_road_reports.group_service_report_technician,field_service_road_reports.group_service_report_manager">
+                    <field
+                        name="road_report_ids"
+                        context="{'default_task_id': id, 'default_customer_id': partner_id, 'default_report_origin': 'job'}"
+                    >
+                        <list>
+                            <field name="name"/>
+                            <field name="external_report_number"/>
+                            <field name="service_date"/>
+                            <field name="report_company_name"/>
+                            <field name="driver_id"/>
+                            <field name="sync_state"/>
+                            <field name="submitted_at"/>
+                            <field name="labor_hours" widget="float_time"/>
+                            <field name="completed_on_site"/>
+                            <field name="follow_up_required"/>
+                            <field name="create_invoice"/>
+                            <field name="state"/>
+                        </list>
+                    </field>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

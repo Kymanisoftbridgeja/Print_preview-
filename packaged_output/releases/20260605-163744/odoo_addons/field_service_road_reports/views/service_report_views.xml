@@ -1,0 +1,340 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_field_service_road_report_list" model="ir.ui.view">
+        <field name="name">field.service.road.report.list</field>
+        <field name="model">field.service.road.report</field>
+        <field name="arch" type="xml">
+            <list string="Road Reports">
+                <field name="name"/>
+                <field name="service_date"/>
+                <field name="customer_id"/>
+                <field name="report_company_name"/>
+                <field name="site_contact"/>
+                <field name="external_report_number"/>
+                <field name="driver_id"/>
+                <field name="field_service_job_id"/>
+                <field name="source"/>
+                <field name="submitted_from_mobile"/>
+                <field name="report_origin"/>
+                <field name="mobile_sync_status"/>
+                <field name="labor_hours" widget="float_time"/>
+                <field name="completed_on_site"/>
+                <field name="follow_up_required"/>
+                <field name="submitted_at"/>
+                <field name="follow_up_task_id" groups="field_service_road_reports.group_service_report_manager"/>
+                <field name="create_invoice" groups="field_service_road_reports.group_service_report_manager"/>
+                <field name="sale_order_id" groups="field_service_road_reports.group_service_report_manager"/>
+                <field name="invoice_id" groups="field_service_road_reports.group_service_report_manager"/>
+                <field name="state"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_field_service_road_report_form" model="ir.ui.view">
+        <field name="name">field.service.road.report.form</field>
+        <field name="model">field.service.road.report</field>
+        <field name="arch" type="xml">
+            <form string="Road Report">
+                <header>
+                    <button name="action_start_service" string="Start" type="object" class="btn-primary" invisible="state not in ('assigned', 'completed')"/>
+                    <button name="action_stop_service" string="Stop" type="object" class="btn-primary" invisible="state != 'in_progress'"/>
+                    <button name="action_submit" string="Complete" type="object" class="btn-primary" invisible="state not in ('assigned', 'in_progress', 'completed')"/>
+                    <button name="action_approve" string="Approve" type="object" class="btn-primary" groups="field_service_road_reports.group_service_report_manager" invisible="state != 'completed'"/>
+                    <button name="action_reset_to_assigned" string="Reset to Assigned" type="object" groups="field_service_road_reports.group_service_report_manager" invisible="state not in ('completed', 'approved')"/>
+                    <field name="state" widget="statusbar" statusbar_visible="assigned,in_progress,completed,approved"/>
+                </header>
+                <sheet>
+                    <div name="button_box" class="oe_button_box">
+                        <button
+                            name="action_open_related_task"
+                            type="object"
+                            class="oe_stat_button"
+                            icon="fa-tasks"
+                            invisible="not task_id"
+                        >
+                            <field name="related_task_count" widget="statinfo" string="Field Service Job"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <label for="name"/>
+                        <h1><field name="name"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="customer_id"/>
+                            <field name="billable_partner_id"/>
+                            <field name="contact_person_id"/>
+                            <field name="field_service_job_id"/>
+                            <field name="report_origin"/>
+                            <field name="source"/>
+                            <field name="submitted_from_mobile"/>
+                            <field name="mobile_external_id"/>
+                            <field name="mobile_device_id"/>
+                            <field name="mobile_sync_status"/>
+                            <field name="mobile_last_sync_date"/>
+                            <field name="submitted_at" readonly="1"/>
+                            <field name="submitted_by" readonly="1"/>
+                            <field name="service_date"/>
+                            <field name="start_datetime" readonly="1"/>
+                            <field name="arrival_time" widget="float_time"/>
+                            <field name="external_report_number"/>
+                        </group>
+                        <group>
+                            <field name="driver_id"/>
+                            <field name="vehicle"/>
+                            <field name="purchase_order"/>
+                            <field name="service_type"/>
+                            <field name="stop_datetime" readonly="1"/>
+                            <field name="departure_time" widget="float_time"/>
+                            <field name="labor_hours" widget="float_time" readonly="1"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Service Report">
+                            <group string="Customer and Site">
+                                <group>
+                                    <field name="report_company_name"/>
+                                    <field name="report_address"/>
+                                    <field name="customer_name"/>
+                                    <field name="site_contact"/>
+                                </group>
+                                <group>
+                                    <field name="customer_phone"/>
+                                    <field name="customer_email"/>
+                                    <field name="location"/>
+                                    <field name="source_pdf" filename="source_pdf_filename"/>
+                                    <field name="source_pdf_filename" invisible="1"/>
+                                </group>
+                            </group>
+                            <group string="Equipment">
+                                <group>
+                                    <field name="make_model_kva"/>
+                                    <field name="equipment_make"/>
+                                    <field name="equipment_model"/>
+                                    <field name="equipment_kva"/>
+                                    <field name="equipment_type_serial"/>
+                                </group>
+                                <group>
+                                    <field name="equipment_type"/>
+                                    <field name="equipment_serial"/>
+                                    <field name="load"/>
+                                    <field name="input_output_voltage"/>
+                                    <field name="ups_system_down"/>
+                                </group>
+                            </group>
+                            <group string="Battery">
+                                <field name="battery_manufacturer_type"/>
+                                <field name="battery_rating_quantity"/>
+                            </group>
+                            <group string="Service Findings">
+                                <field name="problem_service_rendered"/>
+                                <field name="defects_found"/>
+                                <field name="diagnosis"/>
+                                <field name="corrective_action_taken"/>
+                                <field name="resolution"/>
+                                <field name="recommendations"/>
+                            </group>
+                            <group string="Completion">
+                                <group>
+                                    <field name="technicians_on_site"/>
+                                    <field name="service_status"/>
+                                    <field name="completed_on_site"/>
+                                    <field name="follow_up_required"/>
+                                </group>
+                                <group>
+                                    <field name="odometer_start"/>
+                                    <field name="odometer_end"/>
+                                    <field name="mileage" readonly="1"/>
+                                    <field name="customer_notes"/>
+                                </group>
+                            </group>
+                            <group string="Attachments">
+                                <field name="attachment_ids" widget="many2many_binary" nolabel="1"/>
+                            </group>
+                        </page>
+                        <page string="Planned Products / Services">
+                            <field name="planned_line_ids" context="{'default_line_type': 'planned'}">
+                                <list editable="bottom">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="line_type" column_invisible="1"/>
+                                    <field name="product_id"/>
+                                    <field name="name"/>
+                                    <field name="quantity"/>
+                                    <field name="uom_id"/>
+                                    <field name="invoiceable"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Actual Parts / Items Used">
+                            <field name="actual_line_ids" context="{'default_line_type': 'actual'}">
+                                <list editable="bottom">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="line_type" column_invisible="1"/>
+                                    <field name="product_id"/>
+                                    <field name="name"/>
+                                    <field name="serial_number"/>
+                                    <field name="quantity"/>
+                                    <field name="uom_id"/>
+                                    <field name="price_unit"/>
+                                    <field name="invoiceable"/>
+                                    <field name="notes"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Quotation / Invoice Links" groups="field_service_road_reports.group_service_report_manager">
+                            <group>
+                                <group>
+                                    <field name="sale_order_id"/>
+                                    <field name="manual_quotation_number"/>
+                                </group>
+                                <group>
+                                    <field name="invoice_id"/>
+                                    <field name="manual_invoice_number"/>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="Signatures">
+                            <group>
+                                <group string="Customer Signature">
+                                    <field name="customer_signature_name"/>
+                                    <field name="customer_signed_at"/>
+                                    <field name="customer_signature" widget="signature"/>
+                                </group>
+                                <group string="Technician Signature">
+                                    <field name="driver_signature_name"/>
+                                    <field name="driver_signed_at"/>
+                                    <field name="driver_signature" widget="signature"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_field_service_road_report_search" model="ir.ui.view">
+        <field name="name">field.service.road.report.search</field>
+        <field name="model">field.service.road.report</field>
+        <field name="arch" type="xml">
+            <search string="Road Reports">
+                <field name="name"/>
+                <field name="customer_id"/>
+                <field name="report_company_name"/>
+                <field name="driver_id"/>
+                <field name="field_service_job_id"/>
+                <filter string="Completed" name="completed" domain="[('state', '=', 'completed')]"/>
+                <filter string="Completed from Mobile" name="submitted_mobile" domain="[('source', '=', 'mobile'), ('state', '=', 'completed')]"/>
+                <filter string="Emergency / Unscheduled" name="emergency_mobile" domain="[('source', '=', 'mobile'), ('field_service_job_id', '=', False)]"/>
+                <filter string="Linked to Job" name="linked_to_job" domain="[('field_service_job_id', '!=', False)]"/>
+                <filter string="Approved" name="approved" domain="[('state', '=', 'approved')]"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_field_service_road_report" model="ir.actions.act_window">
+        <field name="name">My Service Reports</field>
+        <field name="res_model">field.service.road.report</field>
+        <field name="view_mode">list,form</field>
+        <field name="view_id" ref="view_field_service_road_report_list"/>
+        <field name="domain">['|', '|', ('driver_id', '=', uid), ('assigned_user_id', '=', uid), ('create_uid', '=', uid)]</field>
+        <field name="context">{'default_report_origin': 'emergency'}</field>
+    </record>
+
+    <record id="action_field_service_road_report_submitted_mobile" model="ir.actions.act_window">
+        <field name="name">Completed from Mobile</field>
+        <field name="res_model">field.service.road.report</field>
+        <field name="view_mode">list,form</field>
+        <field name="view_id" ref="view_field_service_road_report_list"/>
+        <field name="domain">[('source', '=', 'mobile'), ('state', '=', 'completed')]</field>
+        <field name="context">{'search_default_submitted_mobile': 1}</field>
+    </record>
+
+    <record id="action_field_service_road_report_linked_jobs" model="ir.actions.act_window">
+        <field name="name">Linked to Field Service Jobs</field>
+        <field name="res_model">field.service.road.report</field>
+        <field name="view_mode">list,form</field>
+        <field name="view_id" ref="view_field_service_road_report_list"/>
+        <field name="domain">[('field_service_job_id', '!=', False)]</field>
+        <field name="context">{'search_default_linked_to_job': 1}</field>
+    </record>
+
+    <record id="action_field_service_road_report_emergency" model="ir.actions.act_window">
+        <field name="name">Emergency / Unscheduled Reports</field>
+        <field name="res_model">field.service.road.report</field>
+        <field name="view_mode">list,form</field>
+        <field name="view_id" ref="view_field_service_road_report_list"/>
+        <field name="domain">[('source', '=', 'mobile'), ('field_service_job_id', '=', False)]</field>
+        <field name="context">{'default_source': 'mobile', 'default_report_origin': 'emergency', 'search_default_emergency_mobile': 1}</field>
+    </record>
+
+    <record id="action_field_service_road_report_approved" model="ir.actions.act_window">
+        <field name="name">Approved Reports</field>
+        <field name="res_model">field.service.road.report</field>
+        <field name="view_mode">list,form</field>
+        <field name="view_id" ref="view_field_service_road_report_list"/>
+        <field name="domain">[('state', '=', 'approved')]</field>
+        <field name="context">{'search_default_approved': 1}</field>
+    </record>
+
+    <record id="action_field_service_road_report_all" model="ir.actions.act_window">
+        <field name="name">All Reports</field>
+        <field name="res_model">field.service.road.report</field>
+        <field name="view_mode">list,form</field>
+        <field name="view_id" ref="view_field_service_road_report_list"/>
+        <field name="context">{}</field>
+    </record>
+
+    <menuitem
+        id="menu_service_reports_app_root"
+        name="Service Reports"
+        action="action_field_service_road_report"
+        sequence="75"
+    />
+    <menuitem
+        id="menu_service_reports_my_reports"
+        name="My Reports"
+        parent="menu_service_reports_app_root"
+        action="action_field_service_road_report"
+        sequence="10"
+    />
+    <menuitem
+        id="menu_service_reports_review"
+        name="Completed from Mobile"
+        parent="menu_service_reports_app_root"
+        action="action_field_service_road_report_submitted_mobile"
+        groups="field_service_road_reports.group_service_report_manager"
+        sequence="20"
+    />
+    <menuitem
+        id="menu_service_reports_linked_jobs"
+        name="Linked to Field Service Jobs"
+        parent="menu_service_reports_app_root"
+        action="action_field_service_road_report_linked_jobs"
+        sequence="30"
+    />
+    <menuitem
+        id="menu_service_reports_emergency"
+        name="Emergency / Unscheduled Reports"
+        parent="menu_service_reports_app_root"
+        action="action_field_service_road_report_emergency"
+        sequence="40"
+    />
+    <menuitem
+        id="menu_service_reports_approved"
+        name="Approved Reports"
+        parent="menu_service_reports_app_root"
+        action="action_field_service_road_report_approved"
+        groups="field_service_road_reports.group_service_report_manager"
+        sequence="50"
+    />
+    <menuitem
+        id="menu_service_reports_all"
+        name="All Reports"
+        parent="menu_service_reports_app_root"
+        action="action_field_service_road_report_all"
+        groups="field_service_road_reports.group_service_report_manager"
+        sequence="60"
+    />
+</odoo>
